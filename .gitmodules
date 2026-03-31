@@ -1,0 +1,12 @@
+[submodule "AHA"]
+	path = AHA
+	url = https://github.com/NVlabs/AHA.git
+[submodule "PyRep"]
+	path = PyRep
+	url = https://github.com/stepjam/PyRep.git
+[submodule "RLBench"]
+	path = RLBench
+	url = https://github.com/MohitShridhar/RLBench.git
+[submodule "RoboPoint"]
+	path = RoboPoint
+	url = https://github.com/wentaoyuan/RoboPoint.git

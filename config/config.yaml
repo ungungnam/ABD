@@ -1,0 +1,22 @@
+defaults:
+  - env: real
+  - task: pick_place
+  - policy: abd
+  - dataset_recorder: LeRobot
+  - train: bc
+  - _self_
+
+vlm:
+  url: "http://localhost:9876/inference"
+
+perception:
+  url: "http://localhost:9877/inference"
+
+motion_planner:
+  smoothing: true
+
+max_episodes: 100
+max_retries: 3
+seed: 0
+
+log_dir: outputs/logs/${now:%Y-%m-%d_%H-%M-%S}

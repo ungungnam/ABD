@@ -1,0 +1,34 @@
+name: 'LeRobot'
+
+root: 'outputs/dataset/abd_collection'
+repo_id: 'uhnam/abd'
+
+fps: 5
+
+features : {
+    'observation.images.rgb.wrist': {
+        "dtype": 'video',
+        'shape': [3,480,640],
+        'names': ['channels', 'height', 'width']
+    },
+    'observation.images.rgb.front': {
+        "dtype": 'video',
+        'shape': [3,480,640],
+        'names': ['channels', 'height', 'width']
+    },
+    'observation.images.rgb.table': {
+        "dtype": 'video',
+        'shape': [3,480,640],
+        'names': ['channels', 'height', 'width']
+    },
+     'action': {
+        "dtype": 'float32',
+        'shape': [7,],
+        'names': None
+    },
+    'observation.state': {
+        "dtype": 'float32',
+        'shape': [7,],
+        'names': None
+    },
+}

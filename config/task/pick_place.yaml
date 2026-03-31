@@ -1,0 +1,6 @@
+family: pick_place_reversible
+object: "banana"
+location_a: "plate"
+location_b: "pan"
+forward_task: "pick the banana and put it in the pan"
+reverse_task: "pick the banana and put it in the plate"

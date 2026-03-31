@@ -1,0 +1,4 @@
+name: periodic
+method: Periodic
+period: 10
+max_fail_count: 5

@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs ls:*)",
+      "Bash(grep -r \"class.*Env\" /home/uhnam/workspaces/PaPA/src/envs/*.py)",
+      "Read",
+      "Glob",
+      "Grep",
+      "Read(//home/uhnam/workspaces/**)",
+      "Bash(cp PaPA/src/vlm/vlm_planner.py ABD/src/vlm/vlm_planner.py)",
+      "Bash(cp PaPA/src/vlm/vlm_input.py ABD/src/vlm/vlm_input.py)",
+      "Bash(cp PaPA/src/perception/perception_agent.py ABD/src/perception/perception_agent.py)",
+      "Bash(cp PaPA/src/perception/perception_input.py ABD/src/perception/perception_input.py)",
+      "WebFetch(domain:github.com)",
+      "Bash(gh api:*)",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(e[''''path'''']\\) for e in data.get\\(''''tree'''',[]\\)]\")",
+      "Bash(gh auth:*)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(nvidia-smi --query-gpu=name,memory.total --format=csv)",
+      "Read(//sdb1/**)",
+      "Read(//sda1/**)",
+      "Read(//tmp/**)",
+      "Bash(ls -d /data/AHA/robopoint-data/images/*/)",
+      "Bash(tmux capture-pane:*)",
+      "Bash(ls /data/AHA/robopoint-data/images/VG_100K_2*.zip)",
+      "Bash(grep -oP '^[a-z_]+\\(?=_\\(grasp|slip|rotation|translation|no_rotation|wrong|sequence\\)|$\\)')",
+      "Bash(git submodule:*)"
+    ]
+  }
+}

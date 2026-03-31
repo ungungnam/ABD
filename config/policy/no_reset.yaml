@@ -1,0 +1,3 @@
+name: no_reset
+method: NoReset
+max_fail_count: 5

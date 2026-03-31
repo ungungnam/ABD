@@ -1,0 +1,8 @@
+numpy
+scipy
+hydra-core
+omegaconf
+matplotlib
+requests
+torch
+torchvision

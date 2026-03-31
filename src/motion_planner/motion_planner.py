@@ -1,0 +1,504 @@
+from typing import Any, Dict, List, Optional, Tuple
+import numpy as np
+
+from utils.camera_utils import pts_to_pixels
+from utils.obb_utils import fit_obb_pca, generate_grasps_from_obb
+from utils.transform_utils import inverse_transform, normalize, pq_to_transform_matrix, rotation_geodesic, transform_points, transform_rays
+from utils.utils import map_vlm_action_to_vector
+from utils.trajectory_utils import smoothen_trajectory, visualize_trajectory
+
+
+class MotionPlanner():
+    def __init__(self, config, env, robot, cameras):
+        self.config = config
+        self.env = env
+        self.robot = robot
+        self.cameras = cameras
+
+    def query(self, pick_perception, place_perception, vlm_action=None) -> np.ndarray:
+        pick_grasp_pose = self._get_best_grasp_pose_from_perception(pick_perception)
+        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception)
+
+        if pick_grasp_pose and place_grasp_pose:
+            trajectory, events = self.generate_trajectory(
+                vlm_action=vlm_action,
+                pick_grasp_pose=pick_grasp_pose,
+                place_grasp_pose=place_grasp_pose
+            )
+        else:
+            trajectory, events = self.generate_trajectory(
+                vlm_action=vlm_action
+            )
+
+        smoothened_trajectory = smoothen_trajectory(trajectory)
+        partial_trajectory, partial_events = self.get_partial_trajectory(smoothened_trajectory, events, proportion=1.0)
+
+        return partial_trajectory, partial_events
+
+    def get_reference_object_points(self, perception) -> np.ndarray:
+        used_cameras = list(perception.keys())
+
+        best_score = 0.0
+        best_pts = None
+
+        for i in range(len(used_cameras)):
+            for j in range(len(used_cameras)):
+                if i > j:
+                    camera_1 = used_cameras[i]
+                    camera_2 = used_cameras[j]
+
+                    mask_1 = perception[camera_1]['mask']
+                    mask_2 = perception[camera_2]['mask']
+
+                    mask_1 = np.array(mask_1).reshape((self.cameras[camera_1].height, self.cameras[camera_1].width))
+                    mask_2 = np.array(mask_2).reshape((self.cameras[camera_2].height, self.cameras[camera_2].width))
+
+                    score, pts = self._get_score(
+                        cameras=[camera_1, camera_2],
+                        masks=[mask_1, mask_2]
+                    )
+
+                    if score > best_score:
+                        best_score = score
+                        best_pts = pts
+                else:
+                    continue
+
+        return best_pts
+
+    def get_cone(self, camera, mask, boundary_only=True):
+        H, W = mask.shape
+
+        K = camera.get_intrinsic_matrix()
+
+        if boundary_only:
+            # simple 4-neighborhood boundary: mask True but has any False neighbor
+            m = mask
+            # pad to avoid border issues
+            mp = np.pad(m, ((1, 1), (1, 1)), mode="constant",
+                        constant_values=False)
+            up = mp[0:H,     1:W+1]
+            down = mp[2:H+2,   1:W+1]
+            left = mp[1:H+1,   0:W]
+            right = mp[1:H+1,   2:W+2]
+            boundary = m & (~up | ~down | ~left | ~right)
+            v, u = np.where(boundary)
+        else:
+            v, u = np.where(mask)
+        pixels_uv = np.stack([u, v], axis=1)
+
+        rays_c = self.get_rays(pixels=pixels_uv, K=K, axis_forward='z')
+
+        T_wc = camera.get_extrinsic_matrix()
+        p_wc = T_wc[:3,3]
+        rays_w = transform_rays(T_wc, rays_c)
+
+        return {
+            'origin_w': p_wc,
+            'rays_w': rays_w,
+            'pixels_uv': pixels_uv
+        }
+
+    def current_pose(self):
+        return self.env.current_pose()
+
+    def get_rays(self, pixels, K, axis_forward="x", normalize=True):
+        """
+        Build camera-frame rays from pixel coordinates.
+
+        Args:
+            pixels: (N,2) array-like of (u, v) pixel coords.
+                    u: x-axis (cols), v: y-axis (rows)
+            K: (3,3) intrinsic matrix
+            axis_forward: "z" for standard pinhole (Z forward, OpenCV-like)
+                          "x" for Coppelia/Isaac-style you used earlier (X forward)
+            normalize: whether to normalize rays to unit vectors
+
+        Returns:
+            rays: (N,3) float array, camera-frame ray directions
+        """
+        pixels = np.asarray(pixels, dtype=np.float64)
+        if pixels.ndim == 1:
+            pixels = pixels[None, :]  # (1,2)
+
+        fx, fy = float(K[0, 0]), float(K[1, 1])
+        cx, cy = float(K[0, 2]), float(K[1, 2])
+
+        u = pixels[:, 0]
+        v = pixels[:, 1]
+
+        # Standard pinhole: ray = [(u-cx)/fx, (v-cy)/fy, 1]
+        x_n = (u - cx) / (fx + 1e-12)
+        y_n = (v - cy) / (fy + 1e-12)
+
+        if axis_forward.lower() == "z":
+            rays = np.stack([x_n, y_n, np.ones_like(x_n)], axis=1)  # (N,3)
+
+        elif axis_forward.lower() == "x":
+            # Your earlier convention:
+            # x = 1, y = -(u-cx)/fx, z = -(v-cy)/fy
+            rays = np.stack([np.ones_like(x_n), -x_n, -y_n], axis=1)  # (N,3)
+
+        else:
+            raise ValueError("axis_forward must be 'z' or 'x'")
+
+        if normalize:
+            rays /= (np.linalg.norm(rays, axis=1, keepdims=True) + 1e-12)
+
+        return rays
+
+    def sample_cone_intersection(
+        self,
+        cone,
+        camera,
+        mask,
+        depth_range=(0.1, 1.0), 
+        n_depth=100,
+        pick='frontmost'
+    ):
+        H, W = mask.shape
+
+        origin_w = cone["origin_w"]
+        rays_w = cone["rays_w"]
+        
+        T_wc = camera.get_extrinsic_matrix()
+        T_cw = inverse_transform(T_wc)
+
+        depths = np.linspace(depth_range[0], depth_range[1], n_depth).astype(np.float64)
+        pts_keep_list = []
+
+        for ray_w in rays_w:
+            pt_w = origin_w[None, :] + depths[:, None] * ray_w[None, :]
+            pt_c = transform_points(T_cw, pt_w)
+
+            pixels_c, valid = pts_to_pixels(pts=pt_c, K=camera.get_intrinsic_matrix())
+            
+            u = np.round(pixels_c[:, 0]).astype(int)
+            v = np.round(pixels_c[:, 1]).astype(int)
+            in_img = (u >= 0) & (u < W) & (v >= 0) & (v < H)
+
+            ok = valid & in_img
+            idx = np.where(ok)[0]
+
+            if not np.any(ok):
+                continue
+
+            inside = np.zeros_like(ok, dtype=bool)
+            inside[idx] = mask[v[idx], u[idx]] 
+
+            if not np.any(inside):
+                continue
+
+            if pick == "frontmost":
+                first = np.argmax(inside)      # first True along depth samples
+                pts_keep_list.append(pt_w[first])
+            elif pick == 'all':
+                pts_keep_list.append(pt_w[inside])
+            elif pick =='median':
+                idxs = np.where(inside)[0]
+                mid = idxs[len(idxs) // 2]
+                pts_keep_list.append(pt_w[mid])
+            elif pick == 'IQR':
+                idxs = np.where(inside)[0]
+                d_inside = depths[idxs]
+                q1, q3 = np.percentile(d_inside, [25, 75])
+                keep = (depths >= q1) & (depths <= q3) & inside
+                pts_keep_list.append(pt_w[keep])
+
+        if len(pts_keep_list) == 0:
+            return np.empty((0, 3), dtype=np.float64)
+        pts_keep = np.vstack([p.reshape(1, 3) if p.ndim == 1 else p for p in pts_keep_list])
+        
+        return pts_keep
+
+    def sample_best_grasp(self, grasp_poses, w_trans=1.0, w_rot=0.25):
+        """
+        grasp_poses: list of dict
+        - each dict must contain key "T_wg" : (4,4)
+        Return:
+        best_idx: int
+        best_T: (4,4)
+        best_score: float
+        """
+        if len(grasp_poses) == 0:
+            return None
+
+        T_cur = self.current_pose()          # (4,4)
+        R_cur = T_cur[:3, :3]
+        t_cur = T_cur[:3, 3]
+
+        best_idx = -1
+        best_score = np.inf
+
+        for i, g in enumerate(grasp_poses):
+            T_g = g["T_wg"]
+            R_g = T_g[:3, :3]
+            t_g = T_g[:3, 3]
+
+            d_trans = np.linalg.norm(t_g - t_cur)
+            d_rot = rotation_geodesic(R_cur, R_g)
+
+            score = w_trans * d_trans + w_rot * d_rot
+
+            if score < best_score:
+                best_score = score
+                best_idx = i
+
+        return grasp_poses[best_idx]
+
+    def _make_vlm_subgoal(self, vlm_action, step=0.1, keep_rotation=True):
+        """
+        Make a short-horizon subgoal from current pose moving along v0.
+        """
+        T_cur = self.current_pose()
+        t = T_cur[:3, 3]
+
+        vlm_action_vector = map_vlm_action_to_vector(vlm_action)
+        vlm_action_vector_g = self._transform_to_gripper_frame(vlm_action_vector)
+        vlm_action_vector_w = transform_rays(T_cur, vlm_action_vector_g)
+        v = normalize(vlm_action_vector_w)
+        t_sub = t + step * v
+
+        T_sub = T_cur.copy()
+        T_sub[:3, 3] = t_sub
+
+        if not keep_rotation:
+            # Optionally: keep current anyway (default), or you could align yaw, etc.
+            pass
+
+        return T_sub
+
+    def _interpolate_poses_linear(self, T_a, T_b, max_step=0.03, min_n=3, max_n=60):
+        """
+        max_step: 한 waypoint 간 최대 이동 거리 (m 단위면 0.01~0.03 정도가 흔함)
+        """
+        if T_a is None or T_b is None:
+            return []
+
+        ta = T_a[:3, 3]
+        tb = T_b[:3, 3]
+        dist = float(np.linalg.norm(tb - ta))
+
+        # 거리 기반으로 점 개수 자동 결정
+        n = int(np.ceil(dist / max_step)) + 1
+        n = max(min_n, min(max_n, n))
+
+        Ra = T_a[:3, :3]
+        Rb = T_b[:3, :3]
+
+        poses = []
+        for i in range(n):
+            t = i / max(n - 1, 1)
+
+            T = np.eye(4, dtype=np.float64)
+            T[:3, 3] = (1.0 - t) * ta + t * tb
+
+            # rotation: cheap schedule (필요하면 slerp로 교체 가능)
+            T[:3, :3] = Ra if t < 0.5 else Rb
+            poses.append(T)
+
+        return poses
+
+    def generate_trajectory(
+            self,
+            vlm_action,
+            pick_grasp_pose = None,
+            place_grasp_pose = None,
+            pick_event: str = "CLOSE",
+            place_event: str = "OPEN",
+            step: float = 0.06,
+            close_trans_thresh: float = 0.03,
+            close_rot_thresh_deg: float = 10.0,
+            ext_len=3
+    ) -> Tuple[List[np.ndarray], List[Dict[str, Any]]]:
+        """
+        Return:
+          traj_T: List[4x4] end-effector poses in world (SE(3))
+          events: List of event dicts, e.g. {"at": idx, "cmd": "CLOSE"}
+                 - 'at' is the waypoint index where you *intend* to trigger.
+                 - execution code should still gate by pose error.
+        """
+        def _is_T_close(T1: np.ndarray, T2: np.ndarray) -> bool:
+            d_trans = np.linalg.norm(T1[:3, 3] - T2[:3, 3])
+            d_rot = rotation_geodesic(T1[:3, :3], T2[:3, :3])  # rad
+            return (d_trans < close_trans_thresh) and (d_rot < np.deg2rad(close_rot_thresh_deg))
+
+        def _append(traj: List[np.ndarray], seg: List[np.ndarray]) -> None:
+            if seg:
+                traj.extend(seg)
+
+        T_cur = self.current_pose()
+        traj_T: List[np.ndarray] = []
+        events: List[Dict[str, Any]] = []
+
+        # if pick grasp and place grasp is none
+        # then make traj of T_cur to T_vlm
+        # ---- Case 1: no pick & no place -> VLM-only ----
+        if pick_grasp_pose is None and place_grasp_pose is None:
+            T_vlm = self._make_vlm_subgoal(vlm_action, step=step, keep_rotation=True)
+            traj_T = self._interpolate_poses_linear(T_cur, T_vlm)
+            traj_T = self._prune_duplicates(traj_T)
+            return traj_T, []
+
+        # if pick grasp and place grasp is not none
+        # then make traj of T_cur to T_vlm to T_pick to T_place
+        # ---- Case 2: require BOTH pick and place ----
+        else:
+            pre_pick = pick_grasp_pose["pre_T_wg"]
+            T_pick = pick_grasp_pose["T_wg"]
+            pre_place = place_grasp_pose["pre_T_wg"]
+            T_place = place_grasp_pose["T_wg"]
+
+            # 1) cur -> vlm(pick)
+            if vlm_action is not None:
+                T_vlm = self._make_vlm_subgoal(vlm_action, step=step, keep_rotation=True)
+            else:
+                T_vlm = T_cur
+            _append(traj_T, self._interpolate_poses_linear(T_cur, T_vlm))
+            traj_T = self._prune_duplicates(traj_T)
+
+            # 2) -> pre_pick -> pick (skip segments if already close)
+            seg = None
+            if not _is_T_close(T_vlm, pre_pick):
+                seg = self._interpolate_poses_linear(T_vlm, pre_pick)
+            if not _is_T_close(T_vlm, T_pick):
+                seg = self._interpolate_poses_linear(T_vlm, T_pick)
+
+            seg = self._prune_duplicates(seg)
+            _append(traj_T, seg)
+
+            # 3) extend near pick + CLOSE at extend end (or at pick if ext_len==0)
+            _append(traj_T, [traj_T[-1]]*ext_len)
+            events.append({"at": len(traj_T) - 1, "cmd": pick_event})
+            _append(traj_T, self._interpolate_poses_linear(traj_T[-1], T_cur))
+
+            # 4) -> pre_place -> place (skip if already close)
+            T_start = traj_T[-1]
+            seg = None
+            if not _is_T_close(T_start, pre_place):
+                seg = self._interpolate_poses_linear(T_start, pre_place)
+            if not _is_T_close(T_start, T_place):
+                seg = self._interpolate_poses_linear(T_start, T_place)
+
+            seg = self._prune_duplicates(seg)
+            _append(traj_T, seg)
+
+            # 5) extend near place + OPEN at extend end
+            _append(traj_T, [traj_T[-1]]*ext_len)
+            events.append({"at": len(traj_T) - 1, "cmd": place_event})
+            _append(traj_T, self._interpolate_poses_linear(traj_T[-1], T_cur))
+
+            return traj_T, events
+
+    def _prune_duplicates(self, traj_T: List[np.ndarray], eps: float = 1e-6) -> List[np.ndarray]:
+        if len(traj_T) <= 1:
+            return traj_T
+        pruned = [traj_T[0]]
+        for T in traj_T[1:]:
+            if np.linalg.norm(T[:3, 3] - pruned[-1][:3, 3]) > eps:
+                pruned.append(T)
+        return pruned
+
+    def get_partial_trajectory(
+        self,
+        trajectory,
+        events,
+        proportion=0.5,
+        min_steps=10,
+    ):
+        """
+        MPC-style partial execution.
+        Returns:
+        partial_traj: List[SE(3)]
+        partial_events: List[event dict]
+        """
+        if trajectory is None or len(trajectory) == 0:
+            return [], []
+
+        n = len(trajectory)
+        k = int(np.ceil(proportion * n))
+
+        # ensure at least min_steps if possible
+        k = max(min_steps, k)
+        k = min(n, k)
+
+        partial_traj = trajectory[:k]
+
+        # 🔑 keep only events that fall inside [0, k-1]
+        partial_events = []
+        for e in events:
+            if e["at"] <= k:
+                partial_events.append(e.copy())
+
+        return partial_traj, partial_events
+
+    def _transform_to_gripper_frame(self, v):
+        R = np.array([
+            [0, 0, 1],
+            [0, 1, 0],
+            [1, 0, 0]
+        ])
+        return R@v
+
+    def _get_score(self, cameras, masks):
+        camera_1, camera_2 = cameras
+        mask_1, mask_2 = masks
+
+        cone_1 = self.get_cone(
+            camera=self.cameras[camera_1],
+            mask=mask_1
+        )
+        cone_2 = self.get_cone(
+            camera=self.cameras[camera_2],
+            mask=mask_2
+        )
+
+        points_12 = self.sample_cone_intersection(
+            cone=cone_1,
+            camera=self.cameras[camera_2],
+            mask=mask_2,
+            pick='IQR'
+        )
+        points_21 = self.sample_cone_intersection(
+            cone=cone_2,
+            camera=self.cameras[camera_1],
+            mask=mask_1,
+            pick='IQR'
+        )
+
+        score_12 = len(points_12) / len(cone_1['rays_w'])
+        score_21 = len(points_21) / len(cone_2['rays_w'])
+
+        score = np.mean((score_12, score_21))
+        pts = np.vstack((points_12, points_21))
+
+        return score, pts
+
+    def _get_best_grasp_pose_from_perception(self, perception):
+        if perception['responses_result_is_valid']:
+            object_points = self.get_reference_object_points(perception['responses_result'])
+        else:
+            object_points = None
+
+        if object_points is not None:
+            obb = fit_obb_pca(object_points)
+            grasp_poses = generate_grasps_from_obb(obb, rotation=self.current_pose()[:3, :3])
+            best_grasp_pose = self.sample_best_grasp(grasp_poses)
+            # best_grasp_pose['T_wg'][:3,:3] = self.current_pose()[:3,:3]
+            # best_grasp_pose['pre_T_wg'][:3,:3] = self.current_pose()[:3,:3]
+            best_grasp_pose['T_wg'][:3, :3] = np.array([
+                [-1, 0, 0],
+                [0, 1, 0],
+                [0, 0, -1]
+            ])
+            best_grasp_pose['pre_T_wg'][:3, :3] = np.array([
+                [-1, 0, 0],
+                [0, 1, 0],
+                [0, 0, -1]
+            ])
+
+        else:
+            best_grasp_pose = None
+
+        return best_grasp_pose
+
