@@ -5,6 +5,7 @@ Reuses PaPA's VLM server at localhost:9876 with a VQA-style prompt.
 
 import base64
 import io
+
 import requests
 
 import numpy as np
@@ -65,12 +66,19 @@ class VQAClient:
             return ""
 
     def _build_vqa_payload(self, observation: dict, question: str) -> dict:
-        """Build VLM server payload with images + question."""
-        return {
-            "images": self._encode_observation(observation),
-            "task": question,
-            "mode": "vqa",
-        }
+        """Build VLM server payload with images + question.
+
+        Matches the format expected by run_vlm_server.py:
+          { "front_rgb": [flat pixel list 256x256x3], "wrist_rgb": [...], "task": "..." }
+        """
+        from PIL import Image as PILImage
+        payload = {}
+        for k, v in observation.items():
+            if isinstance(v, np.ndarray) and v.ndim == 3:
+                img = PILImage.fromarray(v.astype(np.uint8)).resize((256, 256), PILImage.BILINEAR)
+                payload[k] = np.array(img, dtype=np.uint8).reshape(-1).tolist()
+        payload["task"] = question
+        return payload
 
     def _encode_observation(self, observation: dict) -> dict:
         """Encode all RGB image arrays in an observation dict to base64 JPEGs."""

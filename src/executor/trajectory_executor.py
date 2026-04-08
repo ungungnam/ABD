@@ -48,9 +48,13 @@ class TrajectoryExecutor:
             cmds = event_map.get(idx, [])
             event = cmds[0] if cmds else None
 
+            import numpy as np
+            print(f"  [WP {idx:02d}] raw xyz=({waypoint[0,3]:.4f}, {waypoint[1,3]:.4f}, {waypoint[2,3]:.4f}) event={event}")
+
             pose_6d, gripper = self.env.waypoint_event_to_pose_6d_gripper(
                 waypoint, event
             )
+            print(f"         pose_6d xyz(um)=({pose_6d[0]}, {pose_6d[1]}, {pose_6d[2]}) gripper={gripper}")
 
             if self.dataset_recorder is not None:
                 frame = self._make_frame(obs, pose_6d, gripper, language_task)
