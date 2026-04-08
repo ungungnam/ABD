@@ -41,6 +41,7 @@ class EpisodeRecord:
     reset_confirm_time: Optional[float] = None     # when human confirmed reset
     intervention_duration: Optional[float] = None  # confirm - request (seconds)
     dataset_episode_idx: Optional[int] = None      # index in success-only dataset
+    policy_details: Optional[dict] = None          # policy-specific eval (e.g. VLM checklist score+items)
 
 
 @dataclass

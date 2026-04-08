@@ -1,0 +1,15 @@
+name: vlm_checklist
+method: VLMChecklist
+
+# Where per-task checklists are read/written. Generated only if the file is
+# missing, so human edits to weights and questions survive across runs.
+checklist_dir: config/checklists
+
+# Decision thresholds on the weighted-normalized score in [0, 1].
+#   score >= tau_reset            -> "next"
+#   tau_retry <= score < tau_reset -> "retry"
+#   score < tau_retry             -> "reset"
+tau_retry: 0.5
+tau_reset: 0.9
+
+max_fail_count: 5

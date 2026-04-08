@@ -27,6 +27,7 @@ from policy.no_reset_policy import NoResetPolicy
 from policy.periodic_policy import PeriodicPolicy
 from policy.naive_policy import NaivePolicy
 from policy.abd_policy import ABDPolicy
+from policy.vlm_checklist_policy import VLMChecklistPolicy
 from metrics.metrics_logger import MetricsLogger, EpisodeRecord, InterventionRecord
 from metrics.failure_classifier import FailureClassifier
 from metrics.dataset_manifest import DatasetManifest
@@ -51,7 +52,11 @@ def build_env(config: DictConfig) -> ABDBaseEnv:
         raise ValueError(f"Unknown environment: {config.env.name}")
 
 
-def build_policy(config: DictConfig, risk_scorer: RiskScorer = None) -> BaseResetPolicy:
+def build_policy(
+    config: DictConfig,
+    risk_scorer: RiskScorer = None,
+    vqa_client: VQAClient = None,
+) -> BaseResetPolicy:
     """Build the reset policy from config."""
     method = config.policy.method
 
@@ -63,6 +68,19 @@ def build_policy(config: DictConfig, risk_scorer: RiskScorer = None) -> BaseRese
         return NaivePolicy()
     elif method == "ABD":
         return ABDPolicy(risk_scorer=risk_scorer)
+    elif method == "VLMChecklist":
+        if vqa_client is None:
+            raise ValueError(
+                "VLMChecklist policy requires a VQA client; this is not "
+                "available in the dummy environment."
+            )
+        return VLMChecklistPolicy(
+            vqa_client=vqa_client,
+            checklist_dir=config.policy.checklist_dir,
+            tau_retry=config.policy.tau_retry,
+            tau_reset=config.policy.tau_reset,
+            max_fail_count=config.policy.max_fail_count,
+        )
     else:
         raise ValueError(f"Unknown policy method: {method}")
 
@@ -113,7 +131,7 @@ class CollectionRunner:
         self.abd_module = ABDModule(self.feature_extractor, risk_scorer)
 
         # Policy
-        self.policy = build_policy(config, risk_scorer)
+        self.policy = build_policy(config, risk_scorer, vqa_client=self.vqa_client)
 
         # Run identity
         self.run_id = str(uuid.uuid4())[:8]
@@ -134,14 +152,14 @@ class CollectionRunner:
         """Initialize real-hardware components (PaPA pipeline)."""
         self.generator = PaPATrajectoryGenerator(config, self.env)
 
-        vqa_client = VQAClient(url=config.vlm.url)
+        self.vqa_client = VQAClient(url=config.vlm.url)
         geometric = GeometricValidator(
             perception_agent=self.generator.get_perception_agent(),
             motion_planner=self.generator.get_motion_planner(),
             env=self.env,
             config=config,
         )
-        vlm_val = VLMValidator(vqa_client)
+        vlm_val = VLMValidator(self.vqa_client)
         self.validator = CombinedValidator(geometric, vlm_val)
 
         self.feature_extractor = ABDFeatureExtractor(
@@ -149,7 +167,7 @@ class CollectionRunner:
             perception_agent=self.generator.get_perception_agent(),
             motion_planner=self.generator.get_motion_planner(),
             env=self.env,
-            vqa_client=vqa_client,
+            vqa_client=self.vqa_client,
         )
 
     def _init_dummy(self, config, risk_scorer):
@@ -158,6 +176,7 @@ class CollectionRunner:
         from validator.dummy_validator import DummyValidator
         from abd.dummy_feature_extractor import DummyFeatureExtractor
 
+        self.vqa_client = None
         seed = getattr(config, "seed", 42)
         self.generator = DummyTrajectoryGenerator(
             failure_rate=0.1, num_waypoints=15, seed=seed,
@@ -261,7 +280,11 @@ class CollectionRunner:
 
             # Module D: ABD features + policy decision
             features = self.feature_extractor.extract(task, validation, fail_count)
-            decision = self.policy.decide(validation, fail_count, ep, features)
+            decision = self.policy.decide(
+                validation, fail_count, ep, features,
+                task=task, observation=exec_result.final_obs,
+            )
+            policy_details = getattr(self.policy, "last_eval", None)
             risk_score = self.abd_module.risk_scorer.compute_risk(features["vector"])
             print(f"  ABD: risk={risk_score:.3f}, decision={decision}")
 
@@ -313,6 +336,7 @@ class CollectionRunner:
                 fail_count=fail_count,
                 failure_type=failure_type,
                 dataset_episode_idx=dataset_episode_idx,
+                policy_details=policy_details,
             )
 
             # Act on decision
