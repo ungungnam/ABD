@@ -14,7 +14,8 @@ class PeriodicPolicy(BaseResetPolicy):
         self._episode_since_reset = 0
 
     def decide(self, validation: ValidationResult, fail_count: int,
-               episode_idx: int, features: dict = None) -> str:
+               episode_idx: int, features: dict = None,
+               task=None, observation=None) -> str:
         self._episode_since_reset += 1
 
         if self._episode_since_reset >= self.period:

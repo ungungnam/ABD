@@ -10,5 +10,6 @@ from policy.base_policy import BaseResetPolicy
 class NoResetPolicy(BaseResetPolicy):
 
     def decide(self, validation: ValidationResult, fail_count: int,
-               episode_idx: int, features: dict = None) -> str:
+               episode_idx: int, features: dict = None,
+               task=None, observation=None) -> str:
         return "next" if validation.success else "retry"

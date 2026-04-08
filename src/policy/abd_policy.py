@@ -15,7 +15,8 @@ class ABDPolicy(BaseResetPolicy):
         self.risk_scorer = risk_scorer
 
     def decide(self, validation: ValidationResult, fail_count: int,
-               episode_idx: int, features: dict = None) -> str:
+               episode_idx: int, features: dict = None,
+               task=None, observation=None) -> str:
         if features is None or "vector" not in features:
             # Fallback: if features unavailable, use simple logic
             return "next" if validation.success else "retry"

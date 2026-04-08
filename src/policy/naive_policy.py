@@ -10,7 +10,8 @@ from policy.base_policy import BaseResetPolicy
 class NaivePolicy(BaseResetPolicy):
 
     def decide(self, validation: ValidationResult, fail_count: int,
-               episode_idx: int, features: dict = None) -> str:
+               episode_idx: int, features: dict = None,
+               task=None, observation=None) -> str:
         # Reset on any failure
         if not validation.success:
             return "reset"
