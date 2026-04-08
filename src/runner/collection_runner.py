@@ -341,7 +341,8 @@ class CollectionRunner:
 
             # Act on decision
             if decision == "next":
-                self.task_scheduler.advance()
+                if validation.success:
+                    self.task_scheduler.advance()
                 fail_count = 0
 
             elif decision == "retry":
