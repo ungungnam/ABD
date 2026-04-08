@@ -1,0 +1,165 @@
+You are designing a reset checklist for an autonomous robot data collection system.
+
+## 1. Definition of Reset
+
+A **reset** is an external intervention that modifies the current malfunctioning environment or scene so that the robot can resume the intended task execution.
+
+A state is considered **reset-required** when the robot cannot reasonably continue the task from the current state without external intervention.
+
+In this framework, reset is not defined by whether the robot has already failed, but by whether the current state is still executable for the intended task.
+
+---
+
+## 2. Purpose of the Checklist
+
+The checklist is used to determine whether the current scene is still executable for a given task, or whether an external reset is required.
+
+The checklist should not diagnose detailed policy errors.
+Instead, it should evaluate whether the environment is suitable for task execution.
+
+The checklist must be organized into the following three categories:
+
+1. **Safety**: whether the robot is safe to operate and whether the scene is non-hazardous.
+2. **Object Feasibility**: whether the task-relevant objects are observable, reachable, and manipulable.
+3. **Interaction Feasibility**: whether the environment supports the physical interaction required by the task.
+
+---
+
+## 3. Checklist Design Principles
+
+When generating the checklist, follow these principles:
+
+* Each item should be answerable with **Yes / No / Unknown**.
+* Each item should describe a **state condition**, not a policy capability.
+* Avoid vague questions such as "Can the robot solve the task?"
+* Prefer concrete, visually grounded questions.
+* The checklist should be minimal but complete.
+* The checklist should focus on reset decision, not task planning.
+* Output questions in English.
+
+---
+
+## 4. Category Descriptions
+
+### A. Safety
+
+Safety checks should ask whether task execution is safe to begin or continue.
+
+Include questions related to:
+
+* robot collision-free status
+* hardware integrity (e.g. gripper)
+* perception / sensor reliability
+* object or scene hazards
+
+### B. Object Feasibility
+
+Object feasibility checks should ask whether the task-relevant objects are ready for manipulation.
+
+Include questions related to:
+
+* object visibility
+* object being inside reachable workspace
+* object being graspable or otherwise manipulable
+
+### C. Interaction Feasibility
+
+Interaction feasibility checks should ask whether the environment supports the required interaction for the task.
+
+Include questions related to:
+
+* accessibility without obstruction
+* sufficient free space / clearance
+* task-compatible geometry or arrangement
+* environmental stability for manipulation
+
+---
+
+## 5. Required Output Format
+
+Generate the output in the following format:
+
+### Task Name
+
+<task name>
+
+### Task Description
+
+<a short description of what the robot is trying to do>
+
+### Reset Definition for This Task
+
+<a task-specific one-paragraph interpretation of reset>
+
+### Checklist
+
+#### [Safety]
+
+1. ...
+2. ...
+3. ...
+4. ...
+
+#### [Object Feasibility]
+
+5. ...
+6. ...
+7. ...
+
+#### [Interaction Feasibility]
+
+8. ...
+9. ...
+10. ...
+11. ...
+
+### Notes
+
+* Briefly explain why these checklist items are sufficient for reset decision.
+* If needed, mention task-specific failure modes that motivated the checklist.
+
+---
+
+## 6. Example
+
+### Example Task
+
+Stack plastic cups by picking up one cup, moving it above another cup, and placing it down to form a vertical stack.
+
+### Example Interpretation
+
+For this task, reset is required when the current scene no longer supports safe and feasible cup manipulation for stacking. This includes cases where the cups are unsafe to interact with, not visible or reachable, or arranged in a way that prevents grasping, aligning, or stacking.
+
+### Example Checklist
+
+#### [Safety]
+
+1. Is the robot in a safe, collision-free configuration?
+2. Is the gripper functioning properly?
+3. Is the perception system providing reliable observations?
+4. Are the cups in a safe and non-hazardous state?
+
+#### [Object Feasibility]
+
+5. Are the task-relevant cups clearly visible?
+6. Are the cups within the robot’s reachable workspace?
+7. Is at least one cup in a graspable state?
+
+#### [Interaction Feasibility]
+
+8. Is there at least one cup that can be accessed without obstruction?
+9. Is there sufficient free space to perform a grasping or stacking action?
+10. Are the cups arranged in a configuration compatible with stacking?
+11. Is the scene stable enough for cup manipulation?
+
+### Notes
+
+These items are sufficient because they cover whether stacking is safe, whether the cups are available for manipulation, and whether the scene physically supports the interactions needed for stacking.
+
+---
+
+## 7. Your Task
+
+Now generate a reset checklist for the following task:
+
+<Task description here>
