@@ -2,39 +2,38 @@ import re
 from typing import Dict, Tuple, Optional
 
 import numpy as np
-import requests
 
-from vlm.vlm_input import build_vlm_input
+from vlm_client.base import VLMBackend, VLMRequest
 
 
 class VLMPlanner:
-    def __init__(self, config):
-        self.config = config
-        self.url = "http://localhost:9876/inference"
+    def __init__(self, backend: VLMBackend):
+        self.backend = backend
 
     def query(
         self,
         observation: Dict[str, np.ndarray],
         task: str,
     ) -> Tuple[str, str]:
-        vlm_input = build_vlm_input(
-            observation=observation,
-            task=task
+        response = self.backend.generate(
+            VLMRequest(prompt=task, images=observation, task_kind="plan")
         )
-
-        response = requests.post(self.url, json=vlm_input).json()['response']
         plan = self.parse_response_to_plan(response)
 
         return plan
 
     def parse_response_to_plan(self, response: str) -> Dict[str, str]:
-        action = self._parse_action(response)
-        pick_object = self._parse_reference_object(response, tag='pick')
-        place_object = self._parse_reference_object(response, tag='place')
-
-        # for QwenVL
-        # pick_object = self._parse_reference_object_qwen(response, tag='pick')
-        # place_object = self._parse_reference_object_qwen(response, tag='place')
+        # Qwen3-VL produces responses with a different conversational shape
+        # (line-prefixed "PICK object:" / "Action direction:" formats), so
+        # we route to a Qwen-specific parser when that backend is active.
+        if getattr(self.backend, "name", "") == "qwen":
+            action = self._parse_action_qwen(response)
+            pick_object = self._parse_reference_object_qwen(response, tag='pick')
+            place_object = self._parse_reference_object_qwen(response, tag='place')
+        else:
+            action = self._parse_action(response)
+            pick_object = self._parse_reference_object(response, tag='pick')
+            place_object = self._parse_reference_object(response, tag='place')
 
         return pick_object, place_object, action
 

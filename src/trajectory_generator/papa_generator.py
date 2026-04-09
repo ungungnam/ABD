@@ -8,6 +8,7 @@ import time
 from typing import Optional
 
 from vlm.vlm_planner import VLMPlanner
+from vlm_client.base import VLMBackend
 from perception.perception_agent import PerceptionAgent
 from motion_planner.motion_planner import MotionPlanner
 
@@ -18,8 +19,8 @@ from trajectory_generator.base_generator import BaseTrajectoryGenerator, Generat
 class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
     """Trajectory generator using PaPA's VLM -> Perception -> Motion pipeline."""
 
-    def __init__(self, config, env):
-        self.vlm_planner = VLMPlanner(config.vlm)
+    def __init__(self, config, env, vlm_backend: VLMBackend):
+        self.vlm_planner = VLMPlanner(vlm_backend)
         self.perception_agent = PerceptionAgent(
             config.perception, cameras=env.get_cameras()
         )

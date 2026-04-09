@@ -2,12 +2,10 @@ defaults:
   - env: real
   - task: pick_place
   - policy: abd
+  - vlm: gpt
   - dataset_recorder: LeRobot
   - train: bc
   - _self_
-
-vlm:
-  url: "http://localhost:9876/inference"
 
 perception:
   url: "http://localhost:9877/inference"

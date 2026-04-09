@@ -1,0 +1,3 @@
+backend: qwen
+url: "http://localhost:9879/inference"
+timeout: 60

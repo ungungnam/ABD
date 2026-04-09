@@ -19,6 +19,7 @@ from validator.base_validator import ValidationResult
 from validator.geometric_validator import GeometricValidator
 from validator.vlm_validator import VLMValidator, CombinedValidator
 from vlm_client.vqa_client import VQAClient
+from vlm_client.factory import build_vlm_backend
 from abd.feature_extractor import ABDFeatureExtractor
 from abd.risk_scorer import RiskScorer
 from abd.abd_module import ABDModule
@@ -150,9 +151,14 @@ class CollectionRunner:
 
     def _init_real(self, config, risk_scorer):
         """Initialize real-hardware components (PaPA pipeline)."""
-        self.generator = PaPATrajectoryGenerator(config, self.env)
+        # Build the VLM backend once and share it across the planner,
+        # the VQA client, the validator, and the policy.
+        self.vlm_backend = build_vlm_backend(config)
+        log.info(f"[CollectionRunner] VLM backend: {self.vlm_backend.name}")
 
-        self.vqa_client = VQAClient(url=config.vlm.url)
+        self.generator = PaPATrajectoryGenerator(config, self.env, self.vlm_backend)
+
+        self.vqa_client = VQAClient(backend=self.vlm_backend)
         geometric = GeometricValidator(
             perception_agent=self.generator.get_perception_agent(),
             motion_planner=self.generator.get_motion_planner(),

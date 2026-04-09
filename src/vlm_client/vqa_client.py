@@ -1,102 +1,66 @@
-"""VQA client — sends yes/no questions to the VLM server.
+"""Visual question answering client.
 
-Reuses PaPA's VLM server at localhost:9876 with a VQA-style prompt.
+Thin facade over a ``VLMBackend``. The public surface
+(``ask`` / ``ask_text`` / ``ask_yes_no``) is unchanged so existing
+callers in ``VLMValidator`` and ``VLMChecklistPolicy`` keep working
+regardless of which backend is wired in via Hydra config.
 """
 
-import base64
-import io
+from typing import Optional
 
-import requests
-
-import numpy as np
+from vlm_client.base import VLMBackend, VLMRequest
 
 
 class VQAClient:
-    """Visual Question Answering client using the VLM server."""
+    """Visual Question Answering client backed by a pluggable VLM."""
 
-    def __init__(self, url: str = "http://localhost:9876/inference"):
-        self.url = url
+    def __init__(self, backend: VLMBackend):
+        self.backend = backend
+
+    @property
+    def backend_name(self) -> str:
+        return getattr(self.backend, "name", "unknown")
 
     def ask(self, observation: dict, question: str) -> str:
-        """Send a VQA question with observation images to the VLM server.
+        """Send a VQA-style question with observation images.
 
         Args:
             observation: dict of {"camera_rgb": np.ndarray(H,W,3), ...}
-            question: The question to ask (e.g., "Is the banana on the pan?")
+            question: The question to ask.
 
         Returns:
-            The VLM response string.
+            The raw response string from the backend.
         """
-        payload = self._build_vqa_payload(observation, question)
-        return self._post(payload)
+        return self.backend.generate(
+            VLMRequest(prompt=question, images=observation, task_kind="vqa")
+        )
 
-    def ask_text(self, observation: dict | None, prompt: str) -> str:
-        """Send a free-form prompt to the VLM server.
+    def ask_text(self, observation: Optional[dict], prompt: str) -> str:
+        """Send a free-form prompt.
 
-        Used for prompts that don't fit the yes/no VQA pattern (e.g.,
-        checklist generation, structured JSON outputs). The observation
-        may be None for text-only queries such as checklist generation
+        Used for prompts that don't fit the yes/no VQA pattern (e.g.
+        checklist generation, structured JSON outputs). ``observation``
+        may be ``None`` for text-only queries such as checklist generation
         from a task description alone.
-
-        Returns:
-            The raw VLM response string (caller is responsible for parsing).
         """
-        payload = {
-            "images": self._encode_observation(observation) if observation else {},
-            "task": prompt,
-            "mode": "vqa",
-        }
-        return self._post(payload)
+        task_kind = "checklist_eval" if observation else "checklist_gen"
+        return self.backend.generate(
+            VLMRequest(prompt=prompt, images=observation, task_kind=task_kind)
+        )
 
     def ask_yes_no(self, observation: dict, question: str) -> bool:
         """Ask a yes/no question and parse the boolean answer."""
         if not question.strip().endswith("?"):
             question = question.strip() + "?"
         full_question = f"{question} Answer with only 'yes' or 'no'."
-        response = self.ask(observation, full_question)
+        response = self.backend.generate(
+            VLMRequest(
+                prompt=full_question,
+                images=observation,
+                task_kind="yes_no",
+            )
+        )
         return self._parse_yes_no(response)
-
-    def _post(self, payload: dict) -> str:
-        try:
-            response = requests.post(self.url, json=payload, timeout=30)
-            response.raise_for_status()
-            return response.json().get("response", "")
-        except Exception as e:
-            print(f"[VQAClient] Error querying VLM server: {e}")
-            return ""
-
-    def _build_vqa_payload(self, observation: dict, question: str) -> dict:
-        """Build VLM server payload with images + question.
-
-        Matches the format expected by run_vlm_server.py:
-          { "front_rgb": [flat pixel list 256x256x3], "wrist_rgb": [...], "task": "..." }
-        """
-        from PIL import Image as PILImage
-        payload = {}
-        for k, v in observation.items():
-            if isinstance(v, np.ndarray) and v.ndim == 3:
-                img = PILImage.fromarray(v.astype(np.uint8)).resize((256, 256), PILImage.BILINEAR)
-                payload[k] = np.array(img, dtype=np.uint8).reshape(-1).tolist()
-        payload["task"] = question
-        return payload
-
-    def _encode_observation(self, observation: dict) -> dict:
-        """Encode all RGB image arrays in an observation dict to base64 JPEGs."""
-        images = {}
-        for k, v in observation.items():
-            if isinstance(v, np.ndarray) and v.ndim == 3:
-                cam_name = k.replace("_rgb", "")
-                images[cam_name] = self._encode_image(v)
-        return images
-
-    @staticmethod
-    def _encode_image(img: np.ndarray) -> str:
-        """Encode numpy RGB image to base64 JPEG string."""
-        from PIL import Image
-        pil_img = Image.fromarray(img)
-        buf = io.BytesIO()
-        pil_img.save(buf, format="JPEG")
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
 
     @staticmethod
     def _parse_yes_no(response: str) -> bool:
