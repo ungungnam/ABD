@@ -38,16 +38,12 @@ class VLMChecklistPolicy(BaseResetPolicy):
         self,
         vqa_client: VQAClient,
         checklist_dir: str,
-        tau_retry: float = 0.5,
         tau_reset: float = 0.9,
-        max_fail_count: int = 5,
     ):
         self.vqa_client = vqa_client
         self.checklist_dir = Path(checklist_dir)
         self.checklist_dir.mkdir(parents=True, exist_ok=True)
-        self.tau_retry = tau_retry
         self.tau_reset = tau_reset
-        self.max_fail_count = max_fail_count
         self._checklists: dict = {}  # task_name -> loaded checklist dict
         self.last_eval: Optional[dict] = None
 
@@ -78,13 +74,13 @@ class VLMChecklistPolicy(BaseResetPolicy):
             "items": per_item,
         }
 
-        if score >= self.tau_reset:
-            return "next"
-        if fail_count + 1 >= self.max_fail_count:
-            return "reset"
-        if score >= self.tau_retry:
-            return "retry"
-        return "reset"
+        decision = ("next" if validation.success else "retry") if score >= self.tau_reset else "reset"
+
+        log.info(f"[VLMChecklistPolicy] task={task.name} | score={score:.3f} | tau={self.tau_reset} | success={validation.success} | decision={decision}")
+        for item in per_item:
+            log.info(f"  [{item['answer'].upper():3s}] (w={item['weight']:.2f}) {item['question']}")
+
+        return decision
 
     # ------------------------------------------------------------------ #
     # Checklist generation / loading

@@ -9,7 +9,7 @@ class TaskDefinition:
     language_task: str                 # e.g., "pick the banana and put it in the pan"
     task_type: str                     # e.g., "pick_place"
     canonical_state: dict = field(default_factory=dict)
-    # canonical_state example: {"object": "banana", "location": "plate"}
+    # canonical_state example: {"object": "banana", "location": "plate", "target": "pan"}
 
 
 @dataclass

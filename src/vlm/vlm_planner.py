@@ -1,9 +1,13 @@
+import logging
 import re
 from typing import Dict, Tuple, Optional
 
 import numpy as np
 
 from vlm_client.base import VLMBackend, VLMRequest
+from prompts import VLM_PROMPT_TEMPLATE
+
+log = logging.getLogger(__name__)
 
 
 class VLMPlanner:
@@ -14,15 +18,19 @@ class VLMPlanner:
         self,
         observation: Dict[str, np.ndarray],
         task: str,
-    ) -> Tuple[str, str]:
+    ) -> Tuple[Optional[str], Optional[str], str]:
+        prompt = VLM_PROMPT_TEMPLATE.format(TASK_DESCRIPTION=task)
         response = self.backend.generate(
-            VLMRequest(prompt=task, images=observation, task_kind="plan")
+            VLMRequest(prompt=prompt, images=observation, task_kind="plan")
         )
+        log.debug(f"[VLMPlanner] raw response:\n{response}")
         plan = self.parse_response_to_plan(response)
+        pick, place, action = plan
+        log.info(f"[VLMPlanner] parsed → pick={pick}, place={place}, action={action}")
 
         return plan
 
-    def parse_response_to_plan(self, response: str) -> Dict[str, str]:
+    def parse_response_to_plan(self, response: str) -> Tuple[Optional[str], Optional[str], str]:
         # Qwen3-VL produces responses with a different conversational shape
         # (line-prefixed "PICK object:" / "Action direction:" formats), so
         # we route to a Qwen-specific parser when that backend is active.
@@ -64,8 +72,6 @@ class VLMPlanner:
                 return a
 
         return default
-
-    import re
 
     def _strip_reasoning_block(self, text: str) -> str:
         # <reasoning>...</reasoning> 제거 (대소문자/공백 변형도 허용)
@@ -152,7 +158,7 @@ class VLMPlanner:
             default=None,
             keep_underscore=False,
             max_scan_words=12,
-            tag='referece_object',
+            tag='reference_object',
     ):
         text = (response or "").lower()
 

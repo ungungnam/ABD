@@ -6,3 +6,6 @@ matplotlib
 requests
 torch
 torchvision
+openai>=1.50.0
+Pillow
+lerobot

@@ -8,18 +8,18 @@ fps: 5
 features : {
     'observation.images.rgb.wrist': {
         "dtype": 'video',
-        'shape': [3,480,640],
-        'names': ['channels', 'height', 'width']
+        'shape': [480,640,3],
+        'names': ['height', 'width', 'channels']
     },
     'observation.images.rgb.front': {
         "dtype": 'video',
-        'shape': [3,480,640],
-        'names': ['channels', 'height', 'width']
+        'shape': [480,640,3],
+        'names': ['height', 'width', 'channels']
     },
     'observation.images.rgb.table': {
         "dtype": 'video',
-        'shape': [3,480,640],
-        'names': ['channels', 'height', 'width']
+        'shape': [480,640,3],
+        'names': ['height', 'width', 'channels']
     },
      'action': {
         "dtype": 'float32',

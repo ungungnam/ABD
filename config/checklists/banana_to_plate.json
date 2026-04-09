@@ -1,0 +1,64 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "question": "Is the robot in a safe, collision-free configuration?",
+      "weight": 0.5
+    },
+    {
+      "id": 2,
+      "question": "Is the gripper or end-effector functioning properly?",
+      "weight": 0.4
+    },
+    {
+      "id": 3,
+      "question": "Are the robot's sensors providing reliable observations of the environment?",
+      "weight": 0.3
+    },
+    {
+      "id": 4,
+      "question": "Are the banana and plate free of hazardous substances or unsafe conditions?",
+      "weight": 0.3
+    },
+    {
+      "id": 5,
+      "question": "Is the banana clearly visible in the scene?",
+      "weight": 0.3
+    },
+    {
+      "id": 6,
+      "question": "Is the plate clearly visible in the scene?",
+      "weight": 0.3
+    },
+    {
+      "id": 7,
+      "question": "Is the banana within the robot's reachable workspace?",
+      "weight": 0.3
+    },
+    {
+      "id": 8,
+      "question": "Is the plate within the robot's reachable workspace?",
+      "weight": 0.3
+    },
+    {
+      "id": 9,
+      "question": "Is the banana in a graspable and manipulable position?",
+      "weight": 0.2
+    },
+    {
+      "id": 10,
+      "question": "Is the plate unobstructed and accessible for placing the banana?",
+      "weight": 0.2
+    },
+    {
+      "id": 11,
+      "question": "Is there sufficient free space around the plate to place the banana without collision?",
+      "weight": 0.2
+    },
+    {
+      "id": 12,
+      "question": "Is the plate on a stable surface suitable for placing the banana?",
+      "weight": 0.1
+    }
+  ]
+}

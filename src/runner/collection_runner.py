@@ -78,9 +78,7 @@ def build_policy(
         return VLMChecklistPolicy(
             vqa_client=vqa_client,
             checklist_dir=config.policy.checklist_dir,
-            tau_retry=config.policy.tau_retry,
             tau_reset=config.policy.tau_reset,
-            max_fail_count=config.policy.max_fail_count,
         )
     else:
         raise ValueError(f"Unknown policy method: {method}")
@@ -134,6 +132,10 @@ class CollectionRunner:
         # Policy
         self.policy = build_policy(config, risk_scorer, vqa_client=self.vqa_client)
 
+        # checklist_observer is only available in real mode
+        if self.is_dummy:
+            self.checklist_observer = None
+
         # Run identity
         self.run_id = str(uuid.uuid4())[:8]
         self.policy_method = config.policy.method
@@ -167,6 +169,14 @@ class CollectionRunner:
         )
         vlm_val = VLMValidator(self.vqa_client)
         self.validator = CombinedValidator(geometric, vlm_val)
+
+        # VLMChecklistPolicy observer: always runs alongside the main policy
+        # for logging/comparison, regardless of which policy is configured.
+        self.checklist_observer = VLMChecklistPolicy(
+            vqa_client=self.vqa_client,
+            checklist_dir=config.policy.get("checklist_dir", "config/checklists"),
+            tau_reset=config.policy.get("tau_reset", 0.9),
+        )
 
         self.feature_extractor = ABDFeatureExtractor(
             config=config,
@@ -206,6 +216,9 @@ class CollectionRunner:
 
         # Calibrate ABD canonical state
         self.abd_module.calibrate(self.task_scheduler.current_task())
+
+        if not self.is_dummy:
+            input("\n[Calibration complete] Press Enter to start data collection...")
 
         fail_count = 0
 
@@ -294,6 +307,29 @@ class CollectionRunner:
             risk_score = self.abd_module.risk_scorer.compute_risk(features["vector"])
             print(f"  ABD: risk={risk_score:.3f}, decision={decision}")
 
+            # VLMChecklistPolicy observer — always runs; overrides decision to "reset" if needed
+            if self.checklist_observer is not None:
+                checklist_decision = self.checklist_observer.decide(
+                    validation, fail_count, ep,
+                    task=task, observation=exec_result.final_obs,
+                )
+                checklist_eval = self.checklist_observer.last_eval
+                if checklist_eval:
+                    score = checklist_eval.get("score", 0.0)
+                    items = checklist_eval.get("items", [])
+                    log.info(
+                        f"[ChecklistObserver] decision={checklist_decision}, score={score:.3f}"
+                    )
+                    for item in items:
+                        log.info(
+                            f"  [{item['answer'].upper()}] (w={item['weight']}) {item['question']}"
+                        )
+                print(f"  Checklist: score={checklist_eval['score']:.3f}, decision={checklist_decision}" if checklist_eval else "  Checklist: eval unavailable")
+
+                if checklist_decision == "reset" and decision != "reset":
+                    log.info(f"[ChecklistObserver] Overriding decision '{decision}' → 'reset'")
+                    decision = "reset"
+
             # Classify failure type (only for failed episodes)
             failure_type = ""
             if not validation.success:
@@ -347,8 +383,7 @@ class CollectionRunner:
 
             # Act on decision
             if decision == "next":
-                if validation.success:
-                    self.task_scheduler.advance()
+                self.task_scheduler.advance()
                 fail_count = 0
 
             elif decision == "retry":

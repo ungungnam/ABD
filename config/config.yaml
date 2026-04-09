@@ -1,7 +1,7 @@
 defaults:
   - env: real
   - task: pick_place
-  - policy: abd
+  - policy: vlm_checklist
   - vlm: gpt
   - dataset_recorder: LeRobot
   - train: bc

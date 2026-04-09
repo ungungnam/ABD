@@ -1,0 +1,59 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "question": "Is the robot in a safe, collision-free configuration?",
+      "weight": 0.4
+    },
+    {
+      "id": 2,
+      "question": "Is the gripper or end-effector intact and functioning properly?",
+      "weight": 0.4
+    },
+    {
+      "id": 3,
+      "question": "Is the perception system providing reliable and accurate observations?",
+      "weight": 0.3
+    },
+    {
+      "id": 4,
+      "question": "Are the banana and pan in a safe and non-hazardous state?",
+      "weight": 0.3
+    },
+    {
+      "id": 5,
+      "question": "Is the banana clearly visible to the robot?",
+      "weight": 0.3
+    },
+    {
+      "id": 6,
+      "question": "Is the pan clearly visible to the robot?",
+      "weight": 0.3
+    },
+    {
+      "id": 7,
+      "question": "Is the banana located within the robot's reachable workspace?",
+      "weight": 0.3
+    },
+    {
+      "id": 8,
+      "question": "Is the banana in a graspable state for the robot?",
+      "weight": 0.2
+    },
+    {
+      "id": 9,
+      "question": "Is the interior of the pan accessible to the robot without obstruction?",
+      "weight": 0.2
+    },
+    {
+      "id": 10,
+      "question": "Is there sufficient free space above and around the pan to place the banana?",
+      "weight": 0.2
+    },
+    {
+      "id": 11,
+      "question": "Is the pan resting stably and unlikely to tip during banana placement?",
+      "weight": 0.1
+    }
+  ]
+}
