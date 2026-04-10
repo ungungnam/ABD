@@ -1,85 +1,101 @@
-import os
-import sys
-import select
-import termios
-import tty
+"""Simple episode-based dataset recorder.
+
+Each successful episode is saved as:
+  <root>/episode_XXXXXX/
+      meta.json          – task, timestamps, frame count
+      actions.npy        – (N, 7) float32: pose_6d + gripper
+      states.npy         – (N, 7) float32: same as action (robot state)
+      images/<cam>/      – 000000.png … per frame
+
+Only called save_episode() on success; failed episodes are discarded via
+clear_episode_buffer().
+"""
+
+import json
+import logging
+import time
+from pathlib import Path
 
 import numpy as np
-from omegaconf import OmegaConf
+from PIL import Image
 
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
+log = logging.getLogger(__name__)
+
 
 class DatasetRecorder:
     def __init__(self, config):
-        self.config = config
-        self.features = OmegaConf.to_container(self.config.features, resolve=True)
-
-        for k in self.features.keys():
-            if k in ['action', 'observation.state']:
-                self.features[k]['shape'] = tuple(self.features[k]['shape'])
-
-        self.lerobot_dataset = self._get_lerobot_dataset()
-
-    def _get_lerobot_dataset(self):
-        if os.path.exists(self.config.root):
-            return LeRobotDataset(
-                repo_id=self.config.repo_id,
-                root=self.config.root,
-            )
-        else:
-            return LeRobotDataset.create(
-                repo_id=self.config.repo_id,
-                fps=self.config.fps,
-                features=self.features,
-                root=self.config.root,
-            )
-
-    def _wait_true_false_key(
-        self,
-        prompt: str,
-        true_keys = (" ", "\n", "\r", "y", "Y"),      # Space 또는 Enter
-        false_keys = ("\x7f", "\x08","\b", "n", "N", "q", "Q"),        # Backspace(보통 DEL=\x7f)
-    ) -> bool:
-        sys.stdout.write(prompt)
-        sys.stdout.flush()
-
-        fd = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
-        try:
-            tty.setcbreak(fd)  # 1글자 즉시 입력
-            while True:
-                r, _, _ = select.select([sys.stdin], [], [])
-                if not r:
-                    continue
-                ch = sys.stdin.read(1)
-
-                if ch in true_keys:
-                    print()
-                    return True
-                if ch in false_keys:
-                    print()
-                    return False
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
-    def is_success(self) -> bool:
-        return self._wait_true_false_key(
-            prompt="(Space/Enter)=저장  /  Backspace=저장안함 > "
+        self.root = Path(config.root)
+        self.root.mkdir(parents=True, exist_ok=True)
+        self._buffer: list[dict] = []
+        self._episode_count: int = self._count_existing_episodes()
+        log.info(
+            f"[DatasetRecorder] root={self.root}, "
+            f"existing episodes={self._episode_count}"
         )
 
-    def is_collecting_dataset(self) -> bool:
-        return self._wait_true_false_key(
-            prompt="(Space/Enter)=수집  /  Backspace=중단 > "
-        )
+    # ------------------------------------------------------------------ #
+    # Public API (same interface as before)
+    # ------------------------------------------------------------------ #
 
-    def finalize(self):
-        self.lerobot_dataset.finalize()
+    def add_frame(self, frame: dict) -> None:
+        """Buffer one waypoint frame. Called per waypoint during execution."""
+        self._buffer.append({k: (v.copy() if isinstance(v, np.ndarray) else v)
+                             for k, v in frame.items()})
 
-    def save_episode(self):
-        self.lerobot_dataset.save_episode()
+    def save_episode(self) -> Path:
+        """Persist buffered frames as a new episode directory. Returns path."""
+        if not self._buffer:
+            log.warning("[DatasetRecorder] save_episode called with empty buffer.")
+            return None
 
-    def clear_episode_buffer(self):
-        self.lerobot_dataset.clear_episode_buffer()
+        ep_idx = self._episode_count
+        ep_dir = self.root / f"episode_{ep_idx:06d}"
+        ep_dir.mkdir(parents=True, exist_ok=True)
 
-    def add_frame(self, frame):
-        self.lerobot_dataset.add_frame(frame)
+        # --- images ---
+        img_keys = [k for k in self._buffer[0] if k.startswith("observation.images")]
+        for key in img_keys:
+            cam_name = key.split(".")[-1]
+            cam_dir = ep_dir / "images" / cam_name
+            cam_dir.mkdir(parents=True, exist_ok=True)
+            for i, frame in enumerate(self._buffer):
+                arr = frame[key]
+                if arr.dtype != np.uint8:
+                    arr = np.clip(arr, 0, 255).astype(np.uint8)
+                Image.fromarray(arr).save(cam_dir / f"{i:06d}.png")
+
+        # --- actions / states ---
+        actions = np.stack([f["action"] for f in self._buffer]).astype(np.float32)
+        states  = np.stack([f["observation.state"] for f in self._buffer]).astype(np.float32)
+        np.save(ep_dir / "actions.npy", actions)
+        np.save(ep_dir / "states.npy",  states)
+
+        # --- meta ---
+        meta = {
+            "episode_index": ep_idx,
+            "task": self._buffer[0].get("task", ""),
+            "num_frames": len(self._buffer),
+            "saved_at": time.time(),
+        }
+        with open(ep_dir / "meta.json", "w") as f:
+            json.dump(meta, f, indent=2)
+
+        self._episode_count += 1
+        self._buffer = []
+        log.info(f"[DatasetRecorder] Saved episode {ep_idx} → {ep_dir}")
+        return ep_dir
+
+    def clear_episode_buffer(self) -> None:
+        """Discard buffered frames for a failed episode."""
+        self._buffer = []
+
+    def finalize(self) -> None:
+        """No-op: nothing to flush."""
+        pass
+
+    # ------------------------------------------------------------------ #
+    # Internal
+    # ------------------------------------------------------------------ #
+
+    def _count_existing_episodes(self) -> int:
+        return len(sorted(self.root.glob("episode_*")))
