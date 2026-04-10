@@ -420,7 +420,7 @@ class CollectionRunner:
                 self.metrics.log_episode(record)
 
             except KeyboardInterrupt:
-                print("\n\n[비상 정지] Ctrl+C 입력됨. 현재 에피소드를 실패로 기록하고 run을 종료합니다.")
+                print("\n\n[비상 정지] Ctrl+C 입력됨. 현재 에피소드를 reset으로 기록하고 run을 종료합니다.")
                 log.warning(f"[EmergencyStop] Episode {ep} interrupted by user (Ctrl+C).")
 
                 # 버퍼에 프레임이 있으면 실패로 저장
@@ -430,7 +430,8 @@ class CollectionRunner:
                     else:
                         self.dataset_recorder.clear_episode_buffer()
 
-                # 에피소드 실패 기록
+                # 에피소드 reset으로 기록
+                stop_time = time.time()
                 self.manifest.log_episode(
                     episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
                     task_name=task.name, success=False,
@@ -443,11 +444,23 @@ class CollectionRunner:
                     policy_method=self.policy_method,
                     task_name=task.name,
                     task_direction=task_direction,
-                    timestamp=time.time(),
+                    timestamp=stop_time,
                     success=False,
-                    policy_decision="emergency_stop",
+                    policy_decision="reset",
+                    human_reset=True,
                     failure_type="emergency_stop",
                     fail_count=fail_count,
+                    reset_request_time=stop_time,
+                    reset_confirm_time=stop_time,
+                    intervention_duration=0.0,
+                ))
+                self.metrics.log_intervention(InterventionRecord(
+                    timestamp=stop_time,
+                    run_id=self.run_id,
+                    episode_idx=ep,
+                    episode_id=episode_id,
+                    intervention_type="emergency_stop",
+                    trigger="Ctrl+C",
                 ))
                 break
 
