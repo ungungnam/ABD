@@ -231,24 +231,136 @@ class CollectionRunner:
                      f"Direction: {task_direction}")
             print(f"\n--- Episode {ep+1}/{self.max_episodes}: {task.name} ---")
 
-            # Move robot to init pose
-            self.env.go_to_init_pose()
+            try:
+                # Move robot to init pose
+                self.env.go_to_init_pose()
 
-            # Module A: Generate trajectory
-            gen_result = self.generator.generate(task, self.env)
+                # Module A: Generate trajectory
+                gen_result = self.generator.generate(task, self.env)
 
-            if gen_result.trajectory is None:
-                print(f"  Trajectory generation failed: {gen_result.metadata.get('reason', 'unknown')}")
-                # Log the generation-failure episode before reset
-                failure_type = FailureClassifier.classify(
-                    validation=None, features=None,
-                    fail_count=fail_count, max_retries=self.max_retries,
-                    generation_success=False,
+                if gen_result.trajectory is None:
+                    print(f"  Trajectory generation failed: {gen_result.metadata.get('reason', 'unknown')}")
+                    failure_type = FailureClassifier.classify(
+                        validation=None, features=None,
+                        fail_count=fail_count, max_retries=self.max_retries,
+                        generation_success=False,
+                    )
+                    reset_request_time = time.time()
+                    should_continue, reset_confirm_time = self._handle_reset(task)
+                    intervention_duration = reset_confirm_time - reset_request_time
+
+                    record = EpisodeRecord(
+                        episode_idx=ep,
+                        episode_id=episode_id,
+                        run_id=self.run_id,
+                        policy_method=self.policy_method,
+                        task_name=task.name,
+                        task_direction=task_direction,
+                        timestamp=time.time(),
+                        success=False,
+                        policy_decision="reset",
+                        human_reset=True,
+                        generation_success=False,
+                        generation_time=gen_result.metadata.get("elapsed_time", 0.0),
+                        fail_count=fail_count,
+                        failure_type=failure_type,
+                        reset_request_time=reset_request_time,
+                        reset_confirm_time=reset_confirm_time,
+                        intervention_duration=intervention_duration,
+                    )
+                    self.metrics.log_episode(record)
+                    self.metrics.log_intervention(InterventionRecord(
+                        timestamp=reset_request_time,
+                        run_id=self.run_id,
+                        episode_idx=ep,
+                        episode_id=episode_id,
+                        intervention_type="generation_failure_reset",
+                        trigger="trajectory_generation_failed",
+                    ))
+                    self.manifest.log_episode(
+                        episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
+                        task_name=task.name, success=False,
+                        policy_method=self.policy_method, failure_type=failure_type,
+                    )
+                    fail_count = 0
+                    if not should_continue:
+                        break
+                    continue
+
+                # Module B: Execute trajectory
+                exec_result = self.executor.execute(
+                    gen_result.trajectory, gen_result.events, task.language_task
                 )
-                reset_request_time = time.time()
-                should_continue, reset_confirm_time = self._handle_reset(task)
-                intervention_duration = reset_confirm_time - reset_request_time
 
+                # Module C: Validate task success
+                validation = self.validator.validate(task, exec_result.final_obs, self.env)
+                print(f"  Validation: success={validation.success}, "
+                      f"method={validation.method}, confidence={validation.confidence:.2f}")
+
+                # Module D: ABD features + policy decision
+                features = self.feature_extractor.extract(task, validation, fail_count)
+                decision = self.policy.decide(
+                    validation, fail_count, ep, features,
+                    task=task, observation=exec_result.final_obs,
+                )
+                policy_details = getattr(self.policy, "last_eval", None)
+                risk_score = self.abd_module.risk_scorer.compute_risk(features["vector"])
+                print(f"  ABD: risk={risk_score:.3f}, decision={decision}")
+
+                # VLMChecklistPolicy observer — always runs; overrides decision to "reset" if needed
+                if self.checklist_observer is not None:
+                    checklist_decision = self.checklist_observer.decide(
+                        validation, fail_count, ep,
+                        task=task, observation=exec_result.final_obs,
+                    )
+                    checklist_eval = self.checklist_observer.last_eval
+                    if checklist_eval:
+                        score = checklist_eval.get("score", 0.0)
+                        items = checklist_eval.get("items", [])
+                        log.info(
+                            f"[ChecklistObserver] decision={checklist_decision}, score={score:.3f}"
+                        )
+                        for item in items:
+                            log.info(
+                                f"  [{item['answer'].upper()}] (w={item['weight']}) {item['question']}"
+                            )
+                    print(f"  Checklist: score={checklist_eval['score']:.3f}, decision={checklist_decision}" if checklist_eval else "  Checklist: eval unavailable")
+
+                    if checklist_decision == "reset" and decision != "reset":
+                        log.info(f"[ChecklistObserver] Overriding decision '{decision}' → 'reset'")
+                        decision = "reset"
+                    elif checklist_decision == "retry" and decision == "next":
+                        log.info(f"[ChecklistObserver] Overriding decision 'next' → 'retry'")
+                        decision = "retry"
+
+                # Classify failure type (only for failed episodes)
+                failure_type = ""
+                if not validation.success:
+                    failure_type = FailureClassifier.classify(
+                        validation=validation, features=features,
+                        fail_count=fail_count, max_retries=self.max_retries,
+                    )
+
+                # Store episode data + manifest
+                dataset_episode_idx = None
+                if self.dataset_recorder is not None:
+                    self.dataset_recorder.save_episode(
+                        task_name=task.name, success=validation.success
+                    )
+                if validation.success:
+                    dataset_episode_idx = self.manifest.log_episode(
+                        episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
+                        task_name=task.name, success=True,
+                        policy_method=self.policy_method,
+                    )
+                else:
+                    self.manifest.log_episode(
+                        episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
+                        task_name=task.name, success=False,
+                        policy_method=self.policy_method, failure_type=failure_type,
+                    )
+
+                # Build episode record
                 record = EpisodeRecord(
                     episode_idx=ep,
                     episode_id=episode_id,
@@ -257,169 +369,89 @@ class CollectionRunner:
                     task_name=task.name,
                     task_direction=task_direction,
                     timestamp=time.time(),
-                    success=False,
-                    policy_decision="reset",
-                    human_reset=True,
-                    generation_success=False,
+                    success=validation.success,
+                    policy_decision=decision,
+                    human_reset=False,
+                    abd_features=features,
+                    risk_score=risk_score,
                     generation_time=gen_result.metadata.get("elapsed_time", 0.0),
+                    execution_time=exec_result.elapsed_time,
+                    validation_method=validation.method,
+                    validation_details=validation.details,
+                    generation_success=True,
                     fail_count=fail_count,
                     failure_type=failure_type,
-                    reset_request_time=reset_request_time,
-                    reset_confirm_time=reset_confirm_time,
-                    intervention_duration=intervention_duration,
+                    dataset_episode_idx=dataset_episode_idx,
+                    policy_details=policy_details,
                 )
+
+                # Act on decision
+                if decision == "next":
+                    self.task_scheduler.advance()
+                    fail_count = 0
+
+                elif decision == "retry":
+                    fail_count += 1
+                    if fail_count >= self.max_retries:
+                        print(f"  Max retries ({self.max_retries}) reached, escalating to reset.")
+                        decision = "reset"
+                        record.failure_type = "retry_limit"
+
+                if decision == "reset":
+                    record.human_reset = True
+                    reset_request_time = time.time()
+                    should_continue, reset_confirm_time = self._handle_reset(task)
+                    record.reset_request_time = reset_request_time
+                    record.reset_confirm_time = reset_confirm_time
+                    record.intervention_duration = reset_confirm_time - reset_request_time
+                    self.metrics.log_intervention(InterventionRecord(
+                        timestamp=reset_request_time,
+                        run_id=self.run_id,
+                        episode_idx=ep,
+                        episode_id=episode_id,
+                        intervention_type="policy_reset",
+                        trigger=f"policy={self.policy_method}, decision={decision}",
+                    ))
+                    fail_count = 0
+                    if not should_continue:
+                        self.metrics.log_episode(record)
+                        break
+
                 self.metrics.log_episode(record)
-                self.metrics.log_intervention(InterventionRecord(
-                    timestamp=reset_request_time,
-                    run_id=self.run_id,
-                    episode_idx=ep,
-                    episode_id=episode_id,
-                    intervention_type="generation_failure_reset",
-                    trigger="trajectory_generation_failed",
-                ))
+
+            except KeyboardInterrupt:
+                print("\n\n[비상 정지] Ctrl+C 입력됨. 현재 에피소드를 실패로 기록하고 run을 종료합니다.")
+                log.warning(f"[EmergencyStop] Episode {ep} interrupted by user (Ctrl+C).")
+
+                # 버퍼에 프레임이 있으면 실패로 저장
+                if self.dataset_recorder is not None:
+                    if self.dataset_recorder._buffer:
+                        self.dataset_recorder.save_episode(task_name=task.name, success=False)
+                    else:
+                        self.dataset_recorder.clear_episode_buffer()
+
+                # 에피소드 실패 기록
                 self.manifest.log_episode(
                     episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
                     task_name=task.name, success=False,
-                    policy_method=self.policy_method, failure_type=failure_type,
+                    policy_method=self.policy_method, failure_type="emergency_stop",
                 )
-                fail_count = 0
-                if not should_continue:
-                    break
-                continue
-
-            # Module B: Execute trajectory
-            exec_result = self.executor.execute(
-                gen_result.trajectory, gen_result.events, task.language_task
-            )
-
-            # Module C: Validate task success
-            validation = self.validator.validate(task, exec_result.final_obs, self.env)
-            print(f"  Validation: success={validation.success}, "
-                  f"method={validation.method}, confidence={validation.confidence:.2f}")
-
-            # Module D: ABD features + policy decision
-            features = self.feature_extractor.extract(task, validation, fail_count)
-            decision = self.policy.decide(
-                validation, fail_count, ep, features,
-                task=task, observation=exec_result.final_obs,
-            )
-            policy_details = getattr(self.policy, "last_eval", None)
-            risk_score = self.abd_module.risk_scorer.compute_risk(features["vector"])
-            print(f"  ABD: risk={risk_score:.3f}, decision={decision}")
-
-            # VLMChecklistPolicy observer — always runs; overrides decision to "reset" if needed
-            if self.checklist_observer is not None:
-                checklist_decision = self.checklist_observer.decide(
-                    validation, fail_count, ep,
-                    task=task, observation=exec_result.final_obs,
-                )
-                checklist_eval = self.checklist_observer.last_eval
-                if checklist_eval:
-                    score = checklist_eval.get("score", 0.0)
-                    items = checklist_eval.get("items", [])
-                    log.info(
-                        f"[ChecklistObserver] decision={checklist_decision}, score={score:.3f}"
-                    )
-                    for item in items:
-                        log.info(
-                            f"  [{item['answer'].upper()}] (w={item['weight']}) {item['question']}"
-                        )
-                print(f"  Checklist: score={checklist_eval['score']:.3f}, decision={checklist_decision}" if checklist_eval else "  Checklist: eval unavailable")
-
-                if checklist_decision == "reset" and decision != "reset":
-                    log.info(f"[ChecklistObserver] Overriding decision '{decision}' → 'reset'")
-                    decision = "reset"
-                elif checklist_decision == "retry" and decision == "next":
-                    log.info(f"[ChecklistObserver] Overriding decision 'next' → 'retry'")
-                    decision = "retry"
-
-            # Classify failure type (only for failed episodes)
-            failure_type = ""
-            if not validation.success:
-                failure_type = FailureClassifier.classify(
-                    validation=validation, features=features,
-                    fail_count=fail_count, max_retries=self.max_retries,
-                )
-
-            # Store episode data + manifest
-            dataset_episode_idx = None
-            if self.dataset_recorder is not None:
-                self.dataset_recorder.save_episode(
-                    task_name=task.name, success=validation.success
-                )
-            if validation.success:
-                dataset_episode_idx = self.manifest.log_episode(
-                    episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
-                    task_name=task.name, success=True,
+                self.metrics.log_episode(EpisodeRecord(
+                    episode_idx=ep,
+                    episode_id=episode_id,
+                    run_id=self.run_id,
                     policy_method=self.policy_method,
-                )
-            else:
-                self.manifest.log_episode(
-                    episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
-                    task_name=task.name, success=False,
-                    policy_method=self.policy_method, failure_type=failure_type,
-                )
-
-            # Build episode record
-            record = EpisodeRecord(
-                episode_idx=ep,
-                episode_id=episode_id,
-                run_id=self.run_id,
-                policy_method=self.policy_method,
-                task_name=task.name,
-                task_direction=task_direction,
-                timestamp=time.time(),
-                success=validation.success,
-                policy_decision=decision,
-                human_reset=False,
-                abd_features=features,
-                risk_score=risk_score,
-                generation_time=gen_result.metadata.get("elapsed_time", 0.0),
-                execution_time=exec_result.elapsed_time,
-                validation_method=validation.method,
-                validation_details=validation.details,
-                generation_success=True,
-                fail_count=fail_count,
-                failure_type=failure_type,
-                dataset_episode_idx=dataset_episode_idx,
-                policy_details=policy_details,
-            )
-
-            # Act on decision
-            if decision == "next":
-                self.task_scheduler.advance()
-                fail_count = 0
-
-            elif decision == "retry":
-                fail_count += 1
-                if fail_count >= self.max_retries:
-                    print(f"  Max retries ({self.max_retries}) reached, escalating to reset.")
-                    decision = "reset"
-                    record.failure_type = "retry_limit"
-
-            if decision == "reset":
-                record.human_reset = True
-                reset_request_time = time.time()
-                should_continue, reset_confirm_time = self._handle_reset(task)
-                record.reset_request_time = reset_request_time
-                record.reset_confirm_time = reset_confirm_time
-                record.intervention_duration = reset_confirm_time - reset_request_time
-                self.metrics.log_intervention(InterventionRecord(
-                    timestamp=reset_request_time,
-                    run_id=self.run_id,
-                    episode_idx=ep,
-                    episode_id=episode_id,
-                    intervention_type="policy_reset",
-                    trigger=f"policy={self.policy_method}, decision={decision}",
+                    task_name=task.name,
+                    task_direction=task_direction,
+                    timestamp=time.time(),
+                    success=False,
+                    policy_decision="emergency_stop",
+                    failure_type="emergency_stop",
+                    fail_count=fail_count,
                 ))
-                fail_count = 0
-                if not should_continue:
-                    self.metrics.log_episode(record)
-                    break
+                break
 
-            self.metrics.log_episode(record)
-
-        # Finalize
+        # Finalize — 정상 종료와 비상 정지 모두 여기서 저장
         self.metrics.save()
         self.manifest.save()
         if self.dataset_recorder is not None:
