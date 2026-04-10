@@ -96,6 +96,10 @@ class CollectionRunner:
         self.max_retries = config.max_retries
         self.is_dummy = config.env.name == "dummy"
 
+        # Run identity (must be set before DatasetRecorder)
+        self.run_id = str(uuid.uuid4())[:8]
+        self.policy_method = config.policy.method
+
         # Environment
         self.env = build_env(config)
 
@@ -107,7 +111,7 @@ class CollectionRunner:
         self.dataset_recorder = None
         if not self.is_dummy and hasattr(config, "dataset_recorder"):
             try:
-                self.dataset_recorder = DatasetRecorder(config.dataset_recorder)
+                self.dataset_recorder = DatasetRecorder(config.dataset_recorder, run_id=self.run_id)
             except Exception as e:
                 log.warning(f"Dataset recorder init failed: {e}. Recording disabled.")
 
@@ -135,10 +139,6 @@ class CollectionRunner:
         # checklist_observer is only available in real mode
         if self.is_dummy:
             self.checklist_observer = None
-
-        # Run identity
-        self.run_id = str(uuid.uuid4())[:8]
-        self.policy_method = config.policy.method
 
         # Metrics
         self.metrics = MetricsLogger(
@@ -343,16 +343,17 @@ class CollectionRunner:
 
             # Store episode data + manifest
             dataset_episode_idx = None
-            if validation.success and self.dataset_recorder is not None:
-                self.dataset_recorder.save_episode(task_name=task.name)
+            if self.dataset_recorder is not None:
+                self.dataset_recorder.save_episode(
+                    task_name=task.name, success=validation.success
+                )
+            if validation.success:
                 dataset_episode_idx = self.manifest.log_episode(
                     episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
                     task_name=task.name, success=True,
                     policy_method=self.policy_method,
                 )
             else:
-                if self.dataset_recorder is not None:
-                    self.dataset_recorder.clear_episode_buffer()
                 self.manifest.log_episode(
                     episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
                     task_name=task.name, success=False,
