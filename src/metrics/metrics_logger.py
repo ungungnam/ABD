@@ -42,6 +42,16 @@ class EpisodeRecord:
     intervention_duration: Optional[float] = None  # confirm - request (seconds)
     dataset_episode_idx: Optional[int] = None      # index in success-only dataset
     policy_details: Optional[dict] = None          # policy-specific eval (e.g. VLM checklist score+items)
+    checklist_eval: Optional[dict] = None          # VLMChecklistPolicy observer output (score + items)
+    # --- reset timing (all timestamps are Unix epoch seconds) ---
+    episode_start_time: Optional[float] = None     # when this episode started (go_to_init_pose)
+    episode_end_time: Optional[float] = None       # when execution + validation finished
+    reset_decided_at: Optional[float] = None       # when policy output "reset"
+    reset_request_time: Optional[float] = None     # when human was prompted (already used elsewhere too)
+    reset_confirm_time: Optional[float] = None     # when human confirmed reset
+    reset_decision_to_prompt: Optional[float] = None   # reset_request_time - reset_decided_at
+    reset_prompt_to_confirm: Optional[float] = None    # reset_confirm_time - reset_request_time (= intervention_duration)
+    reset_total_duration: Optional[float] = None       # reset_confirm_time - reset_decided_at
 
 
 @dataclass

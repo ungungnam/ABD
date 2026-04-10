@@ -7,6 +7,7 @@ Implements the full system loop from Section 11 of the spec:
 import time
 import uuid
 import logging
+from dataclasses import asdict
 
 from omegaconf import DictConfig, OmegaConf
 
@@ -226,6 +227,7 @@ class CollectionRunner:
             task = self.task_scheduler.current_task()
             episode_id = str(uuid.uuid4())[:8]
             task_direction = "forward" if self.task_scheduler.is_forward else "reverse"
+            episode_start_time = time.time()
 
             log.info(f"Episode {ep+1}/{self.max_episodes} | Task: {task.name} | "
                      f"Direction: {task_direction}")
@@ -245,9 +247,8 @@ class CollectionRunner:
                         fail_count=fail_count, max_retries=self.max_retries,
                         generation_success=False,
                     )
-                    reset_request_time = time.time()
+                    reset_decided_at = time.time()
                     should_continue, reset_confirm_time = self._handle_reset(task)
-                    intervention_duration = reset_confirm_time - reset_request_time
 
                     record = EpisodeRecord(
                         episode_idx=ep,
@@ -264,13 +265,19 @@ class CollectionRunner:
                         generation_time=gen_result.metadata.get("elapsed_time", 0.0),
                         fail_count=fail_count,
                         failure_type=failure_type,
-                        reset_request_time=reset_request_time,
+                        episode_start_time=episode_start_time,
+                        episode_end_time=reset_confirm_time,
+                        reset_decided_at=reset_decided_at,
+                        reset_request_time=reset_decided_at,
                         reset_confirm_time=reset_confirm_time,
-                        intervention_duration=intervention_duration,
+                        reset_decision_to_prompt=0.0,
+                        reset_prompt_to_confirm=reset_confirm_time - reset_decided_at,
+                        reset_total_duration=reset_confirm_time - reset_decided_at,
+                        intervention_duration=reset_confirm_time - reset_decided_at,
                     )
                     self.metrics.log_episode(record)
                     self.metrics.log_intervention(InterventionRecord(
-                        timestamp=reset_request_time,
+                        timestamp=reset_decided_at,
                         run_id=self.run_id,
                         episode_idx=ep,
                         episode_id=episode_id,
@@ -308,6 +315,7 @@ class CollectionRunner:
                 print(f"  ABD: risk={risk_score:.3f}, decision={decision}")
 
                 # VLMChecklistPolicy observer — always runs; overrides decision to "reset" if needed
+                checklist_eval = None
                 if self.checklist_observer is not None:
                     checklist_decision = self.checklist_observer.decide(
                         validation, fail_count, ep,
@@ -341,12 +349,8 @@ class CollectionRunner:
                         fail_count=fail_count, max_retries=self.max_retries,
                     )
 
-                # Store episode data + manifest
+                # Manifest
                 dataset_episode_idx = None
-                if self.dataset_recorder is not None:
-                    self.dataset_recorder.save_episode(
-                        task_name=task.name, success=validation.success
-                    )
                 if validation.success:
                     dataset_episode_idx = self.manifest.log_episode(
                         episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
@@ -383,6 +387,9 @@ class CollectionRunner:
                     failure_type=failure_type,
                     dataset_episode_idx=dataset_episode_idx,
                     policy_details=policy_details,
+                    checklist_eval=checklist_eval,
+                    episode_start_time=episode_start_time,
+                    episode_end_time=time.time(),
                 )
 
                 # Act on decision
@@ -399,11 +406,16 @@ class CollectionRunner:
 
                 if decision == "reset":
                     record.human_reset = True
-                    reset_request_time = time.time()
+                    reset_decided_at = time.time()
+                    reset_request_time = reset_decided_at   # prompt shown immediately after decision
                     should_continue, reset_confirm_time = self._handle_reset(task)
+                    record.reset_decided_at = reset_decided_at
                     record.reset_request_time = reset_request_time
                     record.reset_confirm_time = reset_confirm_time
-                    record.intervention_duration = reset_confirm_time - reset_request_time
+                    record.reset_decision_to_prompt = 0.0   # decision and prompt are simultaneous
+                    record.reset_prompt_to_confirm = reset_confirm_time - reset_request_time
+                    record.reset_total_duration = reset_confirm_time - reset_decided_at
+                    record.intervention_duration = record.reset_prompt_to_confirm
                     self.metrics.log_intervention(InterventionRecord(
                         timestamp=reset_request_time,
                         run_id=self.run_id,
@@ -415,7 +427,19 @@ class CollectionRunner:
                     fail_count = 0
                     if not should_continue:
                         self.metrics.log_episode(record)
+                        if self.dataset_recorder is not None:
+                            self.dataset_recorder.save_episode(
+                                task_name=task.name, success=validation.success,
+                                record=asdict(record),
+                            )
                         break
+
+                # Save episode data (after record is fully populated incl. reset times)
+                if self.dataset_recorder is not None:
+                    self.dataset_recorder.save_episode(
+                        task_name=task.name, success=validation.success,
+                        record=asdict(record),
+                    )
 
                 self.metrics.log_episode(record)
 

@@ -64,8 +64,8 @@ class RealSenseCamera:
         )
         self.dist = np.array(self.intrinsics.coeffs)
 
-        # warm-up
-        for _ in range(10):
+        # warm-up: 60 frames (~2s at 30fps) to let auto-exposure settle
+        for _ in range(60):
             self.pipeline.wait_for_frames()
 
         self._initialized = True
@@ -89,8 +89,15 @@ class RealSenseCamera:
             T_ct, _ = estimate_T_ct_from_apriltag(
                 rgb=rgb, K=self.K
             )
-            T_ct_list.append(T_ct)
+            if T_ct is not None:
+                T_ct_list.append(T_ct)
             time.sleep(0.1)
+        if not T_ct_list:
+            raise RuntimeError(
+                f"[{self.__class__.__name__}] AprilTag calibration failed: "
+                f"no valid detections in {self._calibration_tries} frames. "
+                "Check that the AprilTag board is visible and well-lit."
+            )
         T_ct_mean = SE3_mean(T_ct_list)
         return T_ct_mean
 
