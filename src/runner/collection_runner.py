@@ -344,7 +344,7 @@ class CollectionRunner:
             # Store episode data + manifest
             dataset_episode_idx = None
             if validation.success and self.dataset_recorder is not None:
-                self.dataset_recorder.save_episode()
+                self.dataset_recorder.save_episode(task_name=task.name)
                 dataset_episode_idx = self.manifest.log_episode(
                     episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
                     task_name=task.name, success=True,
