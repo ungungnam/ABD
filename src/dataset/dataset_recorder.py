@@ -23,7 +23,8 @@ class DatasetRecorder:
     def _get_lerobot_dataset(self):
         if os.path.exists(self.config.root):
             return LeRobotDataset(
-                repo_id=self.config.root,
+                repo_id=self.config.repo_id,
+                root=self.config.root,
             )
         else:
             return LeRobotDataset.create(

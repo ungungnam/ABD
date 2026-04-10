@@ -22,4 +22,10 @@ class ABDPolicy(BaseResetPolicy):
             return "next" if validation.success else "retry"
 
         risk = self.risk_scorer.compute_risk(features["vector"])
-        return self.risk_scorer.decide(risk)
+        decision = self.risk_scorer.decide(risk)
+
+        # Never advance on a failed episode: downgrade "next" → "retry"
+        if not validation.success and decision == "next":
+            decision = "retry"
+
+        return decision

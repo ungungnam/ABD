@@ -329,6 +329,9 @@ class CollectionRunner:
                 if checklist_decision == "reset" and decision != "reset":
                     log.info(f"[ChecklistObserver] Overriding decision '{decision}' → 'reset'")
                     decision = "reset"
+                elif checklist_decision == "retry" and decision == "next":
+                    log.info(f"[ChecklistObserver] Overriding decision 'next' → 'retry'")
+                    decision = "retry"
 
             # Classify failure type (only for failed episodes)
             failure_type = ""
