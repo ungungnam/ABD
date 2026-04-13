@@ -195,7 +195,7 @@ class CollectionRunner:
                         generation_success=False,
                     )
                     reset_decided_at = time.time()
-                    should_continue, reset_confirm_time = self._handle_reset(task, task_direction, success=False)
+                    should_continue, reset_confirm_time = self._handle_reset(task)
 
                     record = EpisodeRecord(
                         episode_idx=ep,
@@ -335,9 +335,7 @@ class CollectionRunner:
                 if decision == "reset":
                     record.human_reset = True
                     reset_decided_at = time.time()
-                    # next_dir: success면 advance(방향 전환), fail이면 같은 방향 재시도
-                    next_dir = ("forward" if task_direction == "reverse" else "reverse") if success else task_direction
-                    should_continue, reset_confirm_time = self._handle_reset(task, next_dir, success)
+                    should_continue, reset_confirm_time = self._handle_reset(task)
                     record.episode_duration = reset_confirm_time - episode_start_time
                     record.reset_prompt_to_confirm = reset_confirm_time - reset_decided_at
                     self.metrics.log_intervention(InterventionRecord(
@@ -447,15 +445,10 @@ class CollectionRunner:
             n = 1
         return f"{today}_{n}"
 
-    def _handle_reset(self, task, next_direction: str = "forward", success: bool = False):
-        """Request human reset and update task scheduler.
+    def _handle_reset(self, task):
+        """Request human reset and recalibrate.
 
-        Args:
-            task: current task definition.
-            next_direction: "forward" or "reverse" shown to the operator.
-            success: whether the episode succeeded.
-                True  → advance() (forward→reverse or reverse→forward)
-                False → reset_to_forward() (always restart from forward)
+        Reset 후에는 항상 forward로 돌아간다.
 
         Returns:
             (should_continue, confirm_time): should_continue is False if
@@ -466,14 +459,10 @@ class CollectionRunner:
             should_continue = True
             confirm_time = time.time()
         else:
-            should_continue, confirm_time = self.human_interface.request_reset(
-                task, next_direction=next_direction
-            )
+            should_continue, confirm_time = self.human_interface.request_reset(task)
 
         if should_continue:
-            if success:
-                self.task_scheduler.advance()   # 방향 전환
-            # else: 같은 방향 유지 — scheduler 변경 없음
+            self.task_scheduler.reset_to_forward()
             if hasattr(self.validator, "reset_state"):
                 self.validator.reset_state()
         return should_continue, confirm_time
