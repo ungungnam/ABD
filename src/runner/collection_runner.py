@@ -19,8 +19,7 @@ from task.task_registry import build_task_pair_from_config
 from trajectory_generator.papa_generator import PaPATrajectoryGenerator
 from executor.trajectory_executor import TrajectoryExecutor
 from validator.base_validator import ValidationResult
-from validator.geometric_validator import GeometricValidator
-from validator.vlm_validator import VLMValidator, CombinedValidator
+from validator.vlm_validator import VLMValidator
 from vlm_client.vqa_client import VQAClient
 from vlm_client.factory import build_vlm_backend
 from abd.feature_extractor import ABDFeatureExtractor
@@ -164,14 +163,7 @@ class CollectionRunner:
         self.generator = PaPATrajectoryGenerator(config, self.env, self.vlm_backend)
 
         self.vqa_client = VQAClient(backend=self.vlm_backend)
-        geometric = GeometricValidator(
-            perception_agent=self.generator.get_perception_agent(),
-            motion_planner=self.generator.get_motion_planner(),
-            env=self.env,
-            config=config,
-        )
-        vlm_val = VLMValidator(self.vqa_client)
-        self.validator = CombinedValidator(geometric, vlm_val)
+        self.validator = VLMValidator(self.vqa_client)
 
         # VLMChecklistPolicy observer: always runs alongside the main policy
         # for logging/comparison, regardless of which policy is configured.
@@ -234,7 +226,6 @@ class CollectionRunner:
 
             log.info(f"Episode {ep+1}/{self.max_episodes} | Task: {task.name} | "
                      f"Direction: {task_direction}")
-            print(f"\n--- Episode {ep+1}/{self.max_episodes}: {task.name} ---")
 
             try:
                 # Move robot to init pose
@@ -244,7 +235,7 @@ class CollectionRunner:
                 gen_result = self.generator.generate(task, self.env)
 
                 if gen_result.trajectory is None:
-                    print(f"  Trajectory generation failed: {gen_result.metadata.get('reason', 'unknown')}")
+                    log.info(f"Trajectory generation failed: {gen_result.metadata.get('reason', 'unknown')}")
                     failure_type = FailureClassifier.classify(
                         validation=None, features=None,
                         fail_count=fail_count, max_retries=self.max_retries,
@@ -296,8 +287,8 @@ class CollectionRunner:
 
                 # Module C: Validate task success
                 validation = self.validator.validate(task, exec_result.final_obs, self.env)
-                print(f"  Validation: success={validation.success}, "
-                      f"method={validation.method}, confidence={validation.confidence:.2f}")
+                log.info(f"Validation: success={validation.success}, "
+                        f"method={validation.method}, confidence={validation.confidence:.2f}")
 
                 # Module D: ABD features + policy decision
                 features = self.feature_extractor.extract(task, validation, fail_count)
@@ -307,7 +298,7 @@ class CollectionRunner:
                 )
                 policy_details = getattr(self.policy, "last_eval", None)
                 risk_score = self.abd_module.risk_scorer.compute_risk(features["vector"])
-                print(f"  ABD: risk={risk_score:.3f}, decision={decision}")
+                log.info(f"ABD: risk={risk_score:.3f}, decision={decision}")
 
                 # VLMChecklistPolicy observer — always runs; overrides decision to "reset" if needed
                 checklist_eval = None
@@ -324,10 +315,9 @@ class CollectionRunner:
                             f"[ChecklistObserver] decision={checklist_decision}, score={score:.3f}"
                         )
                         for item in items:
-                            log.info(
+                            log.debug(
                                 f"  [{item['answer'].upper()}] (w={item['weight']}) {item['question']}"
                             )
-                    print(f"  Checklist: score={checklist_eval['score']:.3f}, decision={checklist_decision}" if checklist_eval else "  Checklist: eval unavailable")
 
                     if checklist_decision == "reset" and decision != "reset":
                         log.info(f"[ChecklistObserver] Overriding decision '{decision}' → 'reset'")
@@ -393,7 +383,7 @@ class CollectionRunner:
                 elif decision == "retry":
                     fail_count += 1
                     if fail_count >= self.max_retries:
-                        print(f"  Max retries ({self.max_retries}) reached, escalating to reset.")
+                        log.warning(f"Max retries ({self.max_retries}) reached, escalating to reset.")
                         decision = "reset"
                         record.failure_type = "retry_limit"
 

@@ -149,7 +149,6 @@ class VLMPlanner:
         token = (chunk[-1] if chunk else (words[0] if words else None))
         return token
 
-    # ---- 여기부터 네 클래스 메서드로 넣으면 됨 ----
     def _parse_reference_object(
             self,
             response: str,
@@ -181,81 +180,6 @@ class VLMPlanner:
 
         # 3) allowed_objects가 있으면 여기서 추가 매칭 로직을 붙일 수 있음(원하면 확장)
         return token or default
-
-    # def _parse_reference_object(
-    #     self,
-    #     response: str,
-    #     *,
-    #     allowed_objects=None,          # 예: {"cup","bottle","blue_basket",...} (있으면 가장 정확)
-    #     default=None,
-    #     keep_underscore=False,          # True면 blue_basket 그대로 유지
-    #     max_scan_words=12,
-    #     tag='referece_object',
-    # ):
-    #     """
-    #     Robustly parse reference_object and compress to a single token.
-    #     Examples:
-    #     - "cup on the table" -> "cup"
-    #     - "the blue_basket"  -> "blue_basket" (keep_underscore=True)
-    #     - "blue basket"      -> "blue_basket" if allowed_objects has it, else "blue"
-    #     """
-    #
-    #     text = response.lower()
-    #
-    #     # 1) tag 기반 후보 추출 (깨진 태그도 허용)
-    #     tag_patterns = [
-    #         fr"[<\[\(]\s*{tag}\s*[>\]\)](.*?)[<\[\(]\s*/\s*{tag}\s*[>\]\)]"
-    #     ]
-    #     candidates = []
-    #     for pat in tag_patterns:
-    #         candidates += [m.strip() for m in re.findall(pat, text, re.DOTALL)]
-    #
-    #     if not candidates:
-    #         return default
-    #
-    #     # 여러 개면 마지막
-    #     obj = candidates[-1]
-    #
-    #     # 2) 기본 정규화
-    #     obj = obj.strip()
-    #     if keep_underscore:
-    #         # underscore는 유지하되 나머지 특수문자 제거
-    #         obj = re.sub(r"[^a-z0-9_\s]", " ", obj)
-    #     else:
-    #         obj = obj.replace("_", " ")
-    #         obj = re.sub(r"[^a-z0-9\s]", " ", obj)
-    #
-    #     obj = re.sub(r"\s+", " ", obj).strip()
-    #     obj = re.sub(r"^(the|a|an|this|that)\s+", "", obj).strip()
-    #
-    #     if not obj:
-    #         return default
-    #
-    #     # 4) allowed_objects가 없거나 매칭 실패면: head noun 규칙으로 단일 토큰화
-    #     #    - "cup on the table" -> "cup"
-    #     #    - "blue basket" -> "basket"(더 낫지만 안전하게 첫 토큰도 OK) : 여기선 stopword 기준으로 자름
-    #     stop_words = {
-    #         "on","in","at","near","next","to","under","over","above","below","beside",
-    #         "left","right","front","back","top","bottom","table","robot","of","with"
-    #     }
-    #     words = obj.split()[:max_scan_words]
-    #     # 관계어(on/in/near...) 나오기 전까지를 후보로 보고,
-    #     # 마지막 명사를 택하는 느낌으로 "가장 마지막 단어"를 선택 (cup on the table -> cup)
-    #     chunk = []
-    #     for w in words:
-    #         if w in stop_words:
-    #             break
-    #         chunk.append(w)
-    #
-    #     if not chunk:
-    #         # fallback: 첫 단어
-    #         token = words[0]
-    #     else:
-    #         token = chunk[-1]  # "blue cup" -> cup, "cup" -> cup
-    #
-    #     # underscore 형태로 내보내고 싶으면 공백 chunk를 underscore로 합칠 수도 있지만
-    #     # 단일 토큰 요구라 여기선 token 하나만 반환
-    #     return token or default
 
     def _parse_action_qwen(
             self,
