@@ -7,6 +7,8 @@ Implements the full system loop from Section 11 of the spec:
 import time
 import uuid
 import logging
+from datetime import datetime
+from pathlib import Path
 from dataclasses import asdict
 
 from omegaconf import DictConfig, OmegaConf
@@ -98,7 +100,7 @@ class CollectionRunner:
         self.is_dummy = config.env.name == "dummy"
 
         # Run identity (must be set before DatasetRecorder)
-        self.run_id = str(uuid.uuid4())[:8]
+        self.run_id = self._make_run_id(config)
         self.policy_method = config.policy.method
 
         # Environment
@@ -173,10 +175,11 @@ class CollectionRunner:
 
         # VLMChecklistPolicy observer: always runs alongside the main policy
         # for logging/comparison, regardless of which policy is configured.
+        obs_cfg = config.get("checklist_observer", {})
         self.checklist_observer = VLMChecklistPolicy(
             vqa_client=self.vqa_client,
-            checklist_dir=config.policy.get("checklist_dir", "config/checklists"),
-            tau_reset=config.policy.get("tau_reset", 0.9),
+            checklist_dir=obs_cfg.get("checklist_dir", "config/checklists"),
+            tau_reset=obs_cfg.get("tau_reset", 0.9),
         )
 
         self.feature_extractor = ABDFeatureExtractor(
@@ -257,7 +260,6 @@ class CollectionRunner:
                         policy_method=self.policy_method,
                         task_name=task.name,
                         task_direction=task_direction,
-                        timestamp=time.time(),
                         success=False,
                         policy_decision="reset",
                         human_reset=True,
@@ -265,15 +267,8 @@ class CollectionRunner:
                         generation_time=gen_result.metadata.get("elapsed_time", 0.0),
                         fail_count=fail_count,
                         failure_type=failure_type,
-                        episode_start_time=episode_start_time,
-                        episode_end_time=reset_confirm_time,
-                        reset_decided_at=reset_decided_at,
-                        reset_request_time=reset_decided_at,
-                        reset_confirm_time=reset_confirm_time,
-                        reset_decision_to_prompt=0.0,
+                        episode_duration=reset_confirm_time - episode_start_time,
                         reset_prompt_to_confirm=reset_confirm_time - reset_decided_at,
-                        reset_total_duration=reset_confirm_time - reset_decided_at,
-                        intervention_duration=reset_confirm_time - reset_decided_at,
                     )
                     self.metrics.log_episode(record)
                     self.metrics.log_intervention(InterventionRecord(
@@ -372,7 +367,6 @@ class CollectionRunner:
                     policy_method=self.policy_method,
                     task_name=task.name,
                     task_direction=task_direction,
-                    timestamp=time.time(),
                     success=validation.success,
                     policy_decision=decision,
                     human_reset=False,
@@ -388,8 +382,7 @@ class CollectionRunner:
                     dataset_episode_idx=dataset_episode_idx,
                     policy_details=policy_details,
                     checklist_eval=checklist_eval,
-                    episode_start_time=episode_start_time,
-                    episode_end_time=time.time(),
+                    episode_duration=time.time() - episode_start_time,
                 )
 
                 # Act on decision
@@ -407,17 +400,11 @@ class CollectionRunner:
                 if decision == "reset":
                     record.human_reset = True
                     reset_decided_at = time.time()
-                    reset_request_time = reset_decided_at   # prompt shown immediately after decision
                     should_continue, reset_confirm_time = self._handle_reset(task)
-                    record.reset_decided_at = reset_decided_at
-                    record.reset_request_time = reset_request_time
-                    record.reset_confirm_time = reset_confirm_time
-                    record.reset_decision_to_prompt = 0.0   # decision and prompt are simultaneous
-                    record.reset_prompt_to_confirm = reset_confirm_time - reset_request_time
-                    record.reset_total_duration = reset_confirm_time - reset_decided_at
-                    record.intervention_duration = record.reset_prompt_to_confirm
+                    record.episode_duration = reset_confirm_time - episode_start_time
+                    record.reset_prompt_to_confirm = reset_confirm_time - reset_decided_at
                     self.metrics.log_intervention(InterventionRecord(
-                        timestamp=reset_request_time,
+                        timestamp=reset_decided_at,
                         run_id=self.run_id,
                         episode_idx=ep,
                         episode_id=episode_id,
@@ -454,7 +441,7 @@ class CollectionRunner:
                     else:
                         self.dataset_recorder.clear_episode_buffer()
 
-                # 에피소드 reset으로 기록
+                # 에피소드 실패로 기록
                 stop_time = time.time()
                 self.manifest.log_episode(
                     episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
@@ -468,15 +455,12 @@ class CollectionRunner:
                     policy_method=self.policy_method,
                     task_name=task.name,
                     task_direction=task_direction,
-                    timestamp=stop_time,
                     success=False,
-                    policy_decision="reset",
-                    human_reset=True,
+                    policy_decision="next",
+                    human_reset=False,
                     failure_type="emergency_stop",
                     fail_count=fail_count,
-                    reset_request_time=stop_time,
-                    reset_confirm_time=stop_time,
-                    intervention_duration=0.0,
+                    episode_duration=stop_time - episode_start_time,
                 ))
                 self.metrics.log_intervention(InterventionRecord(
                     timestamp=stop_time,
@@ -502,6 +486,29 @@ class CollectionRunner:
         print(f"Failure types: {self.metrics.failure_type_distribution()}")
         print(f"Logs saved to: {self.config.log_dir}")
         print(f"{'='*60}")
+
+    def _make_run_id(self, config) -> str:
+        """Generate a run ID of the form YYYYMMDD_N (e.g. 20260413_1).
+
+        Scans the dataset root for existing run_YYYYMMDD_* directories and
+        picks the next available counter for today's date.
+        """
+        today = datetime.now().strftime("%Y%m%d")
+        try:
+            root = Path(config.dataset_recorder.root)
+            existing = [
+                d.name for d in root.iterdir()
+                if d.is_dir() and d.name.startswith(f"run_{today}_")
+            ] if root.exists() else []
+            counters = []
+            for name in existing:
+                suffix = name[len(f"run_{today}_"):]
+                if suffix.isdigit():
+                    counters.append(int(suffix))
+            n = max(counters) + 1 if counters else 0
+        except Exception:
+            n = 1
+        return f"{today}_{n}"
 
     def _handle_reset(self, task):
         """Request human reset and recalibrate.

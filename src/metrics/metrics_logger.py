@@ -16,10 +16,8 @@ import numpy as np
 @dataclass
 class EpisodeRecord:
     """Single episode record for logging."""
-    # --- existing fields ---
     episode_idx: int = 0
     task_name: str = ""
-    timestamp: float = 0.0
     success: bool = False
     policy_decision: str = ""       # "next", "retry", "reset"
     human_reset: bool = False
@@ -29,7 +27,6 @@ class EpisodeRecord:
     execution_time: float = 0.0
     validation_method: str = ""
     validation_details: dict = field(default_factory=dict)
-    # --- new fields for experiment logging ---
     episode_id: str = ""                           # UUID per episode
     run_id: str = ""                               # shared across all episodes in a run
     policy_method: str = ""                        # "NoReset"/"Periodic"/"Naive"/"ABD"
@@ -37,21 +34,12 @@ class EpisodeRecord:
     fail_count: int = 0                            # consecutive failures at decision time
     failure_type: str = ""                         # from FailureClassifier
     generation_success: bool = True                # False if trajectory gen failed
-    reset_request_time: Optional[float] = None     # when reset was requested
-    reset_confirm_time: Optional[float] = None     # when human confirmed reset
-    intervention_duration: Optional[float] = None  # confirm - request (seconds)
     dataset_episode_idx: Optional[int] = None      # index in success-only dataset
     policy_details: Optional[dict] = None          # policy-specific eval (e.g. VLM checklist score+items)
     checklist_eval: Optional[dict] = None          # VLMChecklistPolicy observer output (score + items)
-    # --- reset timing (all timestamps are Unix epoch seconds) ---
-    episode_start_time: Optional[float] = None     # when this episode started (go_to_init_pose)
-    episode_end_time: Optional[float] = None       # when execution + validation finished
-    reset_decided_at: Optional[float] = None       # when policy output "reset"
-    reset_request_time: Optional[float] = None     # when human was prompted (already used elsewhere too)
-    reset_confirm_time: Optional[float] = None     # when human confirmed reset
-    reset_decision_to_prompt: Optional[float] = None   # reset_request_time - reset_decided_at
-    reset_prompt_to_confirm: Optional[float] = None    # reset_confirm_time - reset_request_time (= intervention_duration)
-    reset_total_duration: Optional[float] = None       # reset_confirm_time - reset_decided_at
+    # --- timing (all durations in seconds) ---
+    episode_duration: Optional[float] = None       # total episode time (includes human reset wait if any)
+    reset_prompt_to_confirm: Optional[float] = None    # time human took to confirm reset
 
 
 @dataclass
@@ -76,18 +64,12 @@ class MetricsLogger:
         self.episodes: List[EpisodeRecord] = []
         self.interventions: List[InterventionRecord] = []
         self.start_time: Optional[float] = None
-        self._human_reset_times: List[float] = []
-
     def start_run(self):
         self.start_time = time.time()
         os.makedirs(self.log_dir, exist_ok=True)
 
     def log_episode(self, record: EpisodeRecord):
-        if record.timestamp == 0.0:
-            record.timestamp = time.time()
         self.episodes.append(record)
-        if record.human_reset:
-            self._human_reset_times.append(record.timestamp)
 
     def log_intervention(self, record: InterventionRecord):
         self.interventions.append(record)
@@ -180,10 +162,10 @@ class MetricsLogger:
         return dict(counts)
 
     def total_intervention_time(self) -> float:
-        """Sum of all intervention durations in seconds. (E3)"""
+        """Sum of all human reset durations in seconds. (E3)"""
         return sum(
-            e.intervention_duration for e in self.episodes
-            if e.intervention_duration is not None
+            e.reset_prompt_to_confirm for e in self.episodes
+            if e.reset_prompt_to_confirm is not None
         )
 
     # ---------- I/O ----------
