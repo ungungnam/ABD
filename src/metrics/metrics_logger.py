@@ -10,8 +10,6 @@ from collections import Counter
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional
 
-import numpy as np
-
 
 @dataclass
 class EpisodeRecord:
@@ -21,8 +19,6 @@ class EpisodeRecord:
     success: bool = False
     policy_decision: str = ""       # "next", "retry", "reset"
     human_reset: bool = False
-    abd_features: Optional[dict] = None
-    risk_score: Optional[float] = None
     generation_time: float = 0.0
     execution_time: float = 0.0
     validation_method: str = ""
@@ -35,8 +31,7 @@ class EpisodeRecord:
     failure_type: str = ""                         # from FailureClassifier
     generation_success: bool = True                # False if trajectory gen failed
     dataset_episode_idx: Optional[int] = None      # index in success-only dataset
-    policy_details: Optional[dict] = None          # policy-specific eval (e.g. VLM checklist score+items)
-    checklist_eval: Optional[dict] = None          # VLMChecklistPolicy observer output (score + items)
+    checklist_eval: Optional[dict] = None          # VLMChecklist result: score + per-item breakdown
     # --- timing (all durations in seconds) ---
     episode_duration: Optional[float] = None       # total episode time (includes human reset wait if any)
     reset_prompt_to_confirm: Optional[float] = None    # time human took to confirm reset
@@ -133,16 +128,6 @@ class MetricsLogger:
             return 0.0
         return sum(1 for e in self.episodes if e.success) / len(self.episodes)
 
-    def state_deviation_over_time(self) -> List[float]:
-        """Extract f_dev from each episode (if available)."""
-        deviations = []
-        for e in self.episodes:
-            if e.abd_features and "f_dev" in e.abd_features:
-                deviations.append(e.abd_features["f_dev"])
-            else:
-                deviations.append(float("nan"))
-        return deviations
-
     # ---------- Experiment-specific aggregates ----------
 
     def interventions_per_valid_episodes(self, n: int = 100) -> float:
@@ -178,13 +163,7 @@ class MetricsLogger:
 
         with open(path, "w") as f:
             for record in self.episodes:
-                d = asdict(record)
-                # Convert numpy arrays in abd_features to lists
-                if d.get("abd_features"):
-                    for k, v in d["abd_features"].items():
-                        if isinstance(v, np.ndarray):
-                            d["abd_features"][k] = v.tolist()
-                f.write(json.dumps(d) + "\n")
+                f.write(json.dumps(asdict(record)) + "\n")
 
         # Save intervention log
         intervention_path = os.path.join(self.log_dir, "intervention_log.jsonl")

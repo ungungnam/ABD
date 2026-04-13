@@ -91,11 +91,11 @@ class DatasetRecorder:
         np.save(ep_dir / "states.npy",  states)
 
         # --- meta.json : base fields + full episode record ---
+        # episode_index: dataset-local counter (per outcome/task).
+        # task_name, success come from EpisodeRecord below to avoid duplication.
         meta = {
             "episode_index": ep_idx,
-            "task_name": task_name,
-            "task": self._buffer[0].get("task", ""),
-            "success": success,
+            "task": self._buffer[0].get("task", ""),   # language task string
             "num_frames": len(self._buffer),
             "saved_at": time.time(),
         }

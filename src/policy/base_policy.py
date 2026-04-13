@@ -6,27 +6,17 @@ from validator.base_validator import ValidationResult
 class BaseResetPolicy(ABC):
     """Abstract interface for reset policies.
 
-    Each policy decides whether to: 'next', 'retry', or 'reset'
-    after an episode completes.
+    Each policy answers one question: does the environment need a human reset
+    before the next episode?  The runner applies the decision matrix:
+
+        success=True,  needs_reset=False  →  next  (advance direction)
+        success=True,  needs_reset=True   →  reset + reverse
+        success=False, needs_reset=False  →  retry
+        success=False, needs_reset=True   →  reset + forward
     """
 
     @abstractmethod
-    def decide(self, validation: ValidationResult, fail_count: int,
-               episode_idx: int, features: dict = None,
-               task=None, observation=None) -> str:
-        """Decide the next control action.
-
-        Args:
-            validation: Task success validation result.
-            fail_count: Consecutive failure count.
-            episode_idx: Current episode index.
-            features: ABD feature dict (may be None for non-ABD policies).
-            task: Current TaskDefinition (used by policies that need
-                task name / language description, e.g. VLMChecklistPolicy).
-            observation: Post-execution observation dict (used by policies
-                that re-query a VLM at decision time).
-
-        Returns:
-            One of: 'next', 'retry', 'reset'.
-        """
+    def needs_reset(self, validation: ValidationResult, fail_count: int,
+                    episode_idx: int, task=None, observation=None) -> bool:
+        """Return True if the environment needs a human reset."""
         ...

@@ -2,9 +2,14 @@
 
 Generates a yes/no checklist (with weights) for each task by prompting a VLM
 once, then evaluates the checklist against post-execution observations to
-decide next / retry / reset. Per-task checklists are persisted to
-``config/checklists/<task_name>.json`` so users can hand-edit weights and
-question wording between runs.
+decide whether the environment needs a human reset.
+
+    needs_reset = (score < tau_reset)
+
+where score = Σ(weight_i × yes_i) / Σ(weight_i).
+
+Per-task checklists are persisted to ``config/checklists/<task_name>.json``
+so users can hand-edit weights and question wording between runs.
 """
 
 import json
@@ -24,14 +29,8 @@ log = logging.getLogger(__name__)
 class VLMChecklistPolicy(BaseResetPolicy):
     """Reset policy that asks a VLM to fill out a per-task checklist.
 
-    Decision rule (weighted normalized score):
-        score = sum(weight_i * 1[answer_i == "yes"]) / sum(weight_i)
-        score >= tau_reset            -> "next"
-        tau_retry <= score < tau_reset -> "retry"
-        score < tau_retry             -> "reset"
-
-    A failed escalation (fail_count + 1 >= max_fail_count) is forced to "reset"
-    regardless of score, mirroring the behaviour of the existing ABD policy.
+    needs_reset = (score < tau_reset)
+    where score = Σ(weight_i × yes_i) / Σ(weight_i)
     """
 
     def __init__(
@@ -51,20 +50,17 @@ class VLMChecklistPolicy(BaseResetPolicy):
     # Public API
     # ------------------------------------------------------------------ #
 
-    def decide(
+    def needs_reset(
         self,
         validation: ValidationResult,
         fail_count: int,
         episode_idx: int,
-        features: dict = None,
         task=None,
         observation=None,
-    ) -> str:
-        # Fallback for callers that didn't supply task/observation
-        # (e.g., dummy paths or generation-failure branches).
+    ) -> bool:
         if task is None or observation is None:
             self.last_eval = None
-            return "next" if validation.success else "retry"
+            return False
 
         checklist = self._load_or_generate(task)
         score, per_item = self._evaluate(checklist, task, observation)
@@ -74,13 +70,12 @@ class VLMChecklistPolicy(BaseResetPolicy):
             "items": per_item,
         }
 
-        decision = ("next" if validation.success else "retry") if score >= self.tau_reset else "reset"
-
-        log.info(f"[VLMChecklistPolicy] task={task.name} | score={score:.3f} | tau={self.tau_reset} | success={validation.success} | decision={decision}")
+        reset = score < self.tau_reset
+        log.info(f"[VLMChecklistPolicy] task={task.name} | score={score:.3f} | tau={self.tau_reset} | needs_reset={reset}")
         for item in per_item:
             log.info(f"  [{item['answer'].upper():3s}] (w={item['weight']:.2f}) {item['question']}")
 
-        return decision
+        return reset
 
     # ------------------------------------------------------------------ #
     # Checklist generation / loading

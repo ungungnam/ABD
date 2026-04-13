@@ -18,8 +18,14 @@ from task.task_family import TaskDefinition
 class HumanResetInterface:
     """Terminal-based human reset prompt."""
 
-    def request_reset(self, task: TaskDefinition) -> Tuple[bool, float]:
+    def request_reset(self, task: TaskDefinition,
+                      next_direction: str = "forward") -> Tuple[bool, float]:
         """Block until human confirms the workspace has been reset.
+
+        Args:
+            task: current task definition.
+            next_direction: "forward" or "reverse" — the direction the next
+                episode will run after reset.
 
         Returns:
             (should_continue, confirm_timestamp):
@@ -30,6 +36,7 @@ class HumanResetInterface:
         print("=" * 60)
         print("  HUMAN RESET REQUESTED")
         print(f"  Task: {task.name}")
+        print(f"  Next direction after reset: {next_direction.upper()}")
         print(f"  Please reset the workspace to the canonical state.")
         print(f"  Press SPACE/ENTER when done, or Q to abort.")
         print("=" * 60)

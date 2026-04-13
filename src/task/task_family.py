@@ -34,6 +34,10 @@ class TaskScheduler:
     def current_task(self) -> TaskDefinition:
         return self._pair.forward if self._is_forward else self._pair.reverse
 
+    def next_task(self) -> TaskDefinition:
+        """The task that will run after advance() — i.e., the opposite direction."""
+        return self._pair.reverse if self._is_forward else self._pair.forward
+
     def advance(self):
         """Toggle forward <-> reverse after a successful episode."""
         self._is_forward = not self._is_forward

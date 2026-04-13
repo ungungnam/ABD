@@ -7,12 +7,6 @@ defaults:
   - train: bc
   - _self_
 
-# Checklist observer always runs regardless of active policy.
-# tau_reset here is independent of policy.tau_reset (e.g. ABD uses 0.7).
-checklist_observer:
-  tau_reset: 0.9
-  checklist_dir: ${hydra:runtime.cwd}/config/checklists
-
 perception:
   url: "http://localhost:9877/inference"
 

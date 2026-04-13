@@ -22,14 +22,10 @@ from validator.base_validator import ValidationResult
 from validator.vlm_validator import VLMValidator
 from vlm_client.vqa_client import VQAClient
 from vlm_client.factory import build_vlm_backend
-from abd.feature_extractor import ABDFeatureExtractor
-from abd.risk_scorer import RiskScorer
-from abd.abd_module import ABDModule
 from policy.base_policy import BaseResetPolicy
 from policy.no_reset_policy import NoResetPolicy
 from policy.periodic_policy import PeriodicPolicy
 from policy.naive_policy import NaivePolicy
-from policy.abd_policy import ABDPolicy
 from policy.vlm_checklist_policy import VLMChecklistPolicy
 from metrics.metrics_logger import MetricsLogger, EpisodeRecord, InterventionRecord
 from metrics.failure_classifier import FailureClassifier
@@ -57,7 +53,6 @@ def build_env(config: DictConfig) -> ABDBaseEnv:
 
 def build_policy(
     config: DictConfig,
-    risk_scorer: RiskScorer = None,
     vqa_client: VQAClient = None,
 ) -> BaseResetPolicy:
     """Build the reset policy from config."""
@@ -69,8 +64,6 @@ def build_policy(
         return PeriodicPolicy(period=config.policy.period)
     elif method == "Naive":
         return NaivePolicy()
-    elif method == "ABD":
-        return ABDPolicy(risk_scorer=risk_scorer)
     elif method == "VLMChecklist":
         if vqa_client is None:
             raise ValueError(
@@ -100,7 +93,7 @@ class CollectionRunner:
 
         # Run identity (must be set before DatasetRecorder)
         self.run_id = self._make_run_id(config)
-        self.policy_method = config.policy.method
+        self.policy_method = config.policy.name
 
         # Environment
         self.env = build_env(config)
@@ -120,27 +113,13 @@ class CollectionRunner:
         # Executor
         self.executor = TrajectoryExecutor(self.env, self.dataset_recorder)
 
-        # Risk scorer (shared by ABD module and ABD policy)
-        risk_scorer = RiskScorer(
-            weights=list(config.policy.weights) if hasattr(config.policy, "weights") else [0.25, 0.15, 0.15, 0.10, 0.15, 0.20],
-            tau_retry=getattr(config.policy, "tau_retry", 0.3),
-            tau_reset=getattr(config.policy, "tau_reset", 0.7),
-        )
-
         if self.is_dummy:
-            self._init_dummy(config, risk_scorer)
+            self._init_dummy(config)
         else:
-            self._init_real(config, risk_scorer)
-
-        # ABD module
-        self.abd_module = ABDModule(self.feature_extractor, risk_scorer)
+            self._init_real(config)
 
         # Policy
-        self.policy = build_policy(config, risk_scorer, vqa_client=self.vqa_client)
-
-        # checklist_observer is only available in real mode
-        if self.is_dummy:
-            self.checklist_observer = None
+        self.policy = build_policy(config, vqa_client=self.vqa_client)
 
         # Metrics
         self.metrics = MetricsLogger(
@@ -153,10 +132,8 @@ class CollectionRunner:
         # Human interface
         self.human_interface = HumanResetInterface()
 
-    def _init_real(self, config, risk_scorer):
+    def _init_real(self, config):
         """Initialize real-hardware components (PaPA pipeline)."""
-        # Build the VLM backend once and share it across the planner,
-        # the VQA client, the validator, and the policy.
         self.vlm_backend = build_vlm_backend(config)
         log.info(f"[CollectionRunner] VLM backend: {self.vlm_backend.name}")
 
@@ -165,28 +142,11 @@ class CollectionRunner:
         self.vqa_client = VQAClient(backend=self.vlm_backend)
         self.validator = VLMValidator(self.vqa_client)
 
-        # VLMChecklistPolicy observer: always runs alongside the main policy
-        # for logging/comparison, regardless of which policy is configured.
-        obs_cfg = config.get("checklist_observer", {})
-        self.checklist_observer = VLMChecklistPolicy(
-            vqa_client=self.vqa_client,
-            checklist_dir=obs_cfg.get("checklist_dir", "config/checklists"),
-            tau_reset=obs_cfg.get("tau_reset", 0.9),
-        )
 
-        self.feature_extractor = ABDFeatureExtractor(
-            config=config,
-            perception_agent=self.generator.get_perception_agent(),
-            motion_planner=self.generator.get_motion_planner(),
-            env=self.env,
-            vqa_client=self.vqa_client,
-        )
-
-    def _init_dummy(self, config, risk_scorer):
+    def _init_dummy(self, config):
         """Initialize dummy components for testing without hardware."""
         from trajectory_generator.dummy_generator import DummyTrajectoryGenerator
         from validator.dummy_validator import DummyValidator
-        from abd.dummy_feature_extractor import DummyFeatureExtractor
 
         self.vqa_client = None
         seed = getattr(config, "seed", 42)
@@ -194,10 +154,6 @@ class CollectionRunner:
             failure_rate=0.1, num_waypoints=15, seed=seed,
         )
         self.validator = DummyValidator(base_success_rate=0.7, seed=seed + 1)
-        self.feature_extractor = DummyFeatureExtractor(
-            max_fail_count=getattr(config.policy, "max_fail_count", 5),
-            seed=seed + 2,
-        )
 
     def run(self):
         """Execute the full data collection loop."""
@@ -209,9 +165,6 @@ class CollectionRunner:
         except Exception:
             config_dict = {"raw": str(self.config)}
         self.metrics.save_run_config(config_dict)
-
-        # Calibrate ABD canonical state
-        self.abd_module.calibrate(self.task_scheduler.current_task())
 
         if not self.is_dummy:
             input("\n[Calibration complete] Press Enter to start data collection...")
@@ -242,7 +195,7 @@ class CollectionRunner:
                         generation_success=False,
                     )
                     reset_decided_at = time.time()
-                    should_continue, reset_confirm_time = self._handle_reset(task)
+                    should_continue, reset_confirm_time = self._handle_reset(task, task_direction, success=False)
 
                     record = EpisodeRecord(
                         episode_idx=ep,
@@ -290,53 +243,47 @@ class CollectionRunner:
                 log.info(f"Validation: success={validation.success}, "
                         f"method={validation.method}, confidence={validation.confidence:.2f}")
 
-                # Module D: ABD features + policy decision
-                features = self.feature_extractor.extract(task, validation, fail_count)
-                decision = self.policy.decide(
-                    validation, fail_count, ep, features,
-                    task=task, observation=exec_result.final_obs,
+                # Module D: Policy decision (2×2 matrix)
+                #   success  reset  → action
+                #   True     False  → next   (advance direction)
+                #   True     True   → reset  + advance
+                #   False    False  → retry
+                #   False    True   → reset  + same direction
+                #
+                # 체크리스트 평가 대상:
+                #   success=True  → 다음 task (반대 방향) 기준으로 환경 준비 여부 판단
+                #   success=False → 현재 task (같은 방향) 기준으로 재시도 가능 여부 판단
+                eval_task = self.task_scheduler.next_task() if validation.success else task
+                reset_needed = self.policy.needs_reset(
+                    validation, fail_count, ep,
+                    task=eval_task, observation=exec_result.final_obs,
                 )
-                policy_details = getattr(self.policy, "last_eval", None)
-                risk_score = self.abd_module.risk_scorer.compute_risk(features["vector"])
-                log.info(f"ABD: risk={risk_score:.3f}, decision={decision}")
+                checklist_eval = getattr(self.policy, "last_eval", None)
 
-                # VLMChecklistPolicy observer — always runs; overrides decision to "reset" if needed
-                checklist_eval = None
-                if self.checklist_observer is not None:
-                    checklist_decision = self.checklist_observer.decide(
-                        validation, fail_count, ep,
-                        task=task, observation=exec_result.final_obs,
-                    )
-                    checklist_eval = self.checklist_observer.last_eval
-                    if checklist_eval:
-                        score = checklist_eval.get("score", 0.0)
-                        items = checklist_eval.get("items", [])
-                        log.info(
-                            f"[ChecklistObserver] decision={checklist_decision}, score={score:.3f}"
-                        )
-                        for item in items:
-                            log.debug(
-                                f"  [{item['answer'].upper()}] (w={item['weight']}) {item['question']}"
-                            )
+                success = validation.success
 
-                    if checklist_decision == "reset" and decision != "reset":
-                        log.info(f"[ChecklistObserver] Overriding decision '{decision}' → 'reset'")
-                        decision = "reset"
-                    elif checklist_decision == "retry" and decision == "next":
-                        log.info(f"[ChecklistObserver] Overriding decision 'next' → 'retry'")
-                        decision = "retry"
+                if success and not reset_needed:
+                    decision = "next"
+                elif success and reset_needed:
+                    decision = "reset"
+                elif not success and not reset_needed:
+                    decision = "retry"
+                else:  # not success and reset_needed
+                    decision = "reset"
 
-                # Classify failure type (only for failed episodes)
+                print(f"  Policy: success={success}, needs_reset={reset_needed} → {decision}")
+
+                # Classify failure type
                 failure_type = ""
-                if not validation.success:
+                if not success:
                     failure_type = FailureClassifier.classify(
-                        validation=validation, features=features,
+                        validation=validation, features=None,
                         fail_count=fail_count, max_retries=self.max_retries,
                     )
 
                 # Manifest
                 dataset_episode_idx = None
-                if validation.success:
+                if success:
                     dataset_episode_idx = self.manifest.log_episode(
                         episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
                         task_name=task.name, success=True,
@@ -357,11 +304,9 @@ class CollectionRunner:
                     policy_method=self.policy_method,
                     task_name=task.name,
                     task_direction=task_direction,
-                    success=validation.success,
+                    success=success,
                     policy_decision=decision,
                     human_reset=False,
-                    abd_features=features,
-                    risk_score=risk_score,
                     generation_time=gen_result.metadata.get("elapsed_time", 0.0),
                     execution_time=exec_result.elapsed_time,
                     validation_method=validation.method,
@@ -370,7 +315,6 @@ class CollectionRunner:
                     fail_count=fail_count,
                     failure_type=failure_type,
                     dataset_episode_idx=dataset_episode_idx,
-                    policy_details=policy_details,
                     checklist_eval=checklist_eval,
                     episode_duration=time.time() - episode_start_time,
                 )
@@ -385,12 +329,15 @@ class CollectionRunner:
                     if fail_count >= self.max_retries:
                         log.warning(f"Max retries ({self.max_retries}) reached, escalating to reset.")
                         decision = "reset"
+                        record.policy_decision = "reset"
                         record.failure_type = "retry_limit"
 
                 if decision == "reset":
                     record.human_reset = True
                     reset_decided_at = time.time()
-                    should_continue, reset_confirm_time = self._handle_reset(task)
+                    # next_dir: success면 advance(방향 전환), fail이면 같은 방향 재시도
+                    next_dir = ("forward" if task_direction == "reverse" else "reverse") if success else task_direction
+                    should_continue, reset_confirm_time = self._handle_reset(task, next_dir, success)
                     record.episode_duration = reset_confirm_time - episode_start_time
                     record.reset_prompt_to_confirm = reset_confirm_time - reset_decided_at
                     self.metrics.log_intervention(InterventionRecord(
@@ -399,14 +346,14 @@ class CollectionRunner:
                         episode_idx=ep,
                         episode_id=episode_id,
                         intervention_type="policy_reset",
-                        trigger=f"policy={self.policy_method}, decision={decision}",
+                        trigger=f"policy={self.policy_method}",
                     ))
                     fail_count = 0
                     if not should_continue:
                         self.metrics.log_episode(record)
                         if self.dataset_recorder is not None:
                             self.dataset_recorder.save_episode(
-                                task_name=task.name, success=validation.success,
+                                task_name=task.name, success=success,
                                 record=asdict(record),
                             )
                         break
@@ -500,8 +447,15 @@ class CollectionRunner:
             n = 1
         return f"{today}_{n}"
 
-    def _handle_reset(self, task):
-        """Request human reset and recalibrate.
+    def _handle_reset(self, task, next_direction: str = "forward", success: bool = False):
+        """Request human reset and update task scheduler.
+
+        Args:
+            task: current task definition.
+            next_direction: "forward" or "reverse" shown to the operator.
+            success: whether the episode succeeded.
+                True  → advance() (forward→reverse or reverse→forward)
+                False → reset_to_forward() (always restart from forward)
 
         Returns:
             (should_continue, confirm_time): should_continue is False if
@@ -512,12 +466,14 @@ class CollectionRunner:
             should_continue = True
             confirm_time = time.time()
         else:
-            should_continue, confirm_time = self.human_interface.request_reset(task)
+            should_continue, confirm_time = self.human_interface.request_reset(
+                task, next_direction=next_direction
+            )
 
         if should_continue:
-            self.task_scheduler.reset_to_forward()
-            self.abd_module.calibrate(self.task_scheduler.current_task())
-            # Reset dummy validator state if applicable
+            if success:
+                self.task_scheduler.advance()   # 방향 전환
+            # else: 같은 방향 유지 — scheduler 변경 없음
             if hasattr(self.validator, "reset_state"):
                 self.validator.reset_state()
         return should_continue, confirm_time
