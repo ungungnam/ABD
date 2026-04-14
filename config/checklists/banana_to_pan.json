@@ -38,7 +38,7 @@
     {
       "id": 8,
       "question": "Is the banana in a graspable state for the robot?",
-      "weight": 0.1
+      "weight": 0.2
     },
     {
       "id": 9,
