@@ -16,8 +16,8 @@ class MotionPlanner():
         self.cameras = cameras
 
     def query(self, pick_perception, place_perception, vlm_action=None) -> np.ndarray:
-        pick_grasp_pose = self._get_best_grasp_pose_from_perception(pick_perception)
-        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception)
+        pick_grasp_pose = self._get_best_grasp_pose_from_perception(pick_perception, hover_offset=0.03)
+        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.03)
 
         if pick_grasp_pose and place_grasp_pose:
             trajectory, events = self.generate_trajectory(
@@ -268,7 +268,7 @@ class MotionPlanner():
 
         return T_sub
 
-    def _interpolate_poses_linear(self, T_a, T_b, max_step=0.03, min_n=3, max_n=60):
+    def _interpolate_poses_linear(self, T_a, T_b, max_step=0.05, min_n=2, max_n=60):
         """
         max_step: 한 waypoint 간 최대 이동 거리 (m 단위면 0.01~0.03 정도가 흔함)
         """
@@ -365,7 +365,7 @@ class MotionPlanner():
 
             T_at_pre_pick = traj_T[-1] if traj_T else T_vlm
             if not _is_T_close(T_at_pre_pick, T_pick):
-                seg = self._interpolate_poses_linear(T_at_pre_pick, T_pick, max_step=0.01)
+                seg = self._interpolate_poses_linear(T_at_pre_pick, T_pick, max_step=0.015)
                 seg = self._prune_duplicates(seg)
                 _append(traj_T, seg)
 
@@ -374,16 +374,18 @@ class MotionPlanner():
             events.append({"at": len(traj_T) - 1, "cmd": pick_event})
             _append(traj_T, self._interpolate_poses_linear(traj_T[-1], T_cur))
 
-            # 4) -> pre_place -> place (skip if already close)
+            # 4) -> pre_place (hover 3 cm above) -> place (slow vertical descent)
             T_start = traj_T[-1]
-            seg = None
             if not _is_T_close(T_start, pre_place):
                 seg = self._interpolate_poses_linear(T_start, pre_place)
-            if not _is_T_close(T_start, T_place):
-                seg = self._interpolate_poses_linear(T_start, T_place)
+                seg = self._prune_duplicates(seg)
+                _append(traj_T, seg)
 
-            seg = self._prune_duplicates(seg)
-            _append(traj_T, seg)
+            T_at_pre_place = traj_T[-1] if traj_T else T_start
+            if not _is_T_close(T_at_pre_place, T_place):
+                seg = self._interpolate_poses_linear(T_at_pre_place, T_place, max_step=0.015)
+                seg = self._prune_duplicates(seg)
+                _append(traj_T, seg)
 
             # 5) extend near place + OPEN at extend end
             _append(traj_T, [traj_T[-1]]*ext_len)
@@ -476,7 +478,7 @@ class MotionPlanner():
 
         return score, pts
 
-    def _get_best_grasp_pose_from_perception(self, perception):
+    def _get_best_grasp_pose_from_perception(self, perception, hover_offset=0.05):
         if perception['responses_result_is_valid']:
             object_points = self.get_reference_object_points(perception['responses_result'])
         else:
@@ -486,8 +488,6 @@ class MotionPlanner():
             obb = fit_obb_pca(object_points)
             grasp_poses = generate_grasps_from_obb(obb, rotation=self.current_pose()[:3, :3])
             best_grasp_pose = self.sample_best_grasp(grasp_poses)
-            # best_grasp_pose['T_wg'][:3,:3] = self.current_pose()[:3,:3]
-            # best_grasp_pose['pre_T_wg'][:3,:3] = self.current_pose()[:3,:3]
             forced_R = np.array([
                 [-1, 0, 0],
                 [0, 1, 0],
@@ -495,10 +495,8 @@ class MotionPlanner():
             ])
             best_grasp_pose['T_wg'][:3, :3] = forced_R
             best_grasp_pose['pre_T_wg'][:3, :3] = forced_R
-            # Hover 5 cm directly above the pick point in world Z
-            HOVER_OFFSET = 0.05
             best_grasp_pose['pre_T_wg'][:3, 3] = (
-                best_grasp_pose['T_wg'][:3, 3] + np.array([0.0, 0.0, HOVER_OFFSET])
+                best_grasp_pose['T_wg'][:3, 3] + np.array([0.0, 0.0, hover_offset])
             )
 
         else:
