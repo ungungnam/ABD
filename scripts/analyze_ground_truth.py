@@ -20,9 +20,10 @@ from pathlib import Path
 DATA_ROOT_DEFAULT = Path("/home/gpuadmin/Desktop/data")
 
 LABEL_DESC = {
-    1: "Correct   (policy ↔ human agree)",
-    2: "Incorrect (policy ↔ human disagree)",
-    3: "Ambiguous",
+    1: "True Positive  (reset needed    / policy: reset)",
+    2: "True Negative  (no reset needed / policy: no reset)",
+    3: "False Positive (reset NOT needed / policy: reset)",
+    4: "False Negative (reset needed     / policy: no reset)",
 }
 
 
@@ -91,13 +92,13 @@ def main():
     print(f"  Unlabeled      : {unlabeled}")
     print(f"{'='*60}")
     print()
-    for label in (1, 2, 3):
+    for label in (1, 2, 3, 4):
         eps = buckets.get(label, [])
-        print(f"  Label {label} — {LABEL_DESC[label]}: {len(eps)} episodes")
+        print(f"  Label {label} — {LABEL_DESC.get(label, '?')}: {len(eps)} episodes")
     print()
 
-    # Detailed breakdown for labels 2 and 3
-    for label in (2, 3):
+    # Detailed breakdown for FP and FN
+    for label in (3, 4):
         eps = buckets.get(label, [])
         if not eps:
             continue

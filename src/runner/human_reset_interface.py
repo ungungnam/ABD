@@ -19,22 +19,23 @@ class HumanResetInterface:
     """Terminal-based human reset prompt."""
 
     def request_ground_truth_label(self) -> int:
-        """Ask the operator whether a reset was actually needed after this episode.
+        """Ask the operator to label the policy's reset decision vs. ground truth.
 
         Returns:
-            1 = reset NOT needed (environment was fine)
-            2 = reset WAS needed (environment needed reset)
-            3 = ambiguous
+            1 = True Positive  (reset needed,    policy said reset)
+            2 = True Negative  (no reset needed,  policy said no reset)
+            3 = False Positive (reset NOT needed, policy said reset)
+            4 = False Negative (reset needed,     policy said no reset)
         """
         print()
         print("-" * 60)
         print("  GROUND TRUTH LABEL")
-        print("  Was a reset actually needed after this episode?")
-        print("  1 = Not needed  (o)")
-        print("  2 = Needed      (x)")
-        print("  3 = Ambiguous")
+        print("  1 = True Positive  (reset needed    / policy: reset)")
+        print("  2 = True Negative  (no reset needed / policy: no reset)")
+        print("  3 = False Positive (reset NOT needed / policy: reset)")
+        print("  4 = False Negative (reset needed     / policy: no reset)")
         print("-" * 60)
-        sys.stdout.write("  Label (1/2/3) > ")
+        sys.stdout.write("  Label (1/2/3/4) > ")
         sys.stdout.flush()
 
         fd = sys.stdin.fileno()
@@ -46,7 +47,7 @@ class HumanResetInterface:
                 if not r:
                     continue
                 ch = sys.stdin.read(1)
-                if ch in ("1", "2", "3"):
+                if ch in ("1", "2", "3", "4"):
                     print()
                     return int(ch)
         finally:
