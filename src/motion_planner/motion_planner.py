@@ -357,15 +357,17 @@ class MotionPlanner():
             _append(traj_T, self._interpolate_poses_linear(T_cur, T_vlm))
             traj_T = self._prune_duplicates(traj_T)
 
-            # 2) -> pre_pick -> pick (skip segments if already close)
-            seg = None
+            # 2) -> pre_pick (hover 5 cm above) -> pick (slow vertical descent)
             if not _is_T_close(T_vlm, pre_pick):
                 seg = self._interpolate_poses_linear(T_vlm, pre_pick)
-            if not _is_T_close(T_vlm, T_pick):
-                seg = self._interpolate_poses_linear(T_vlm, T_pick)
+                seg = self._prune_duplicates(seg)
+                _append(traj_T, seg)
 
-            seg = self._prune_duplicates(seg)
-            _append(traj_T, seg)
+            T_at_pre_pick = traj_T[-1] if traj_T else T_vlm
+            if not _is_T_close(T_at_pre_pick, T_pick):
+                seg = self._interpolate_poses_linear(T_at_pre_pick, T_pick, max_step=0.01)
+                seg = self._prune_duplicates(seg)
+                _append(traj_T, seg)
 
             # 3) extend near pick + CLOSE at extend end (or at pick if ext_len==0)
             _append(traj_T, [traj_T[-1]]*ext_len)
@@ -486,16 +488,18 @@ class MotionPlanner():
             best_grasp_pose = self.sample_best_grasp(grasp_poses)
             # best_grasp_pose['T_wg'][:3,:3] = self.current_pose()[:3,:3]
             # best_grasp_pose['pre_T_wg'][:3,:3] = self.current_pose()[:3,:3]
-            best_grasp_pose['T_wg'][:3, :3] = np.array([
+            forced_R = np.array([
                 [-1, 0, 0],
                 [0, 1, 0],
                 [0, 0, -1]
             ])
-            best_grasp_pose['pre_T_wg'][:3, :3] = np.array([
-                [-1, 0, 0],
-                [0, 1, 0],
-                [0, 0, -1]
-            ])
+            best_grasp_pose['T_wg'][:3, :3] = forced_R
+            best_grasp_pose['pre_T_wg'][:3, :3] = forced_R
+            # Hover 5 cm directly above the pick point in world Z
+            HOVER_OFFSET = 0.05
+            best_grasp_pose['pre_T_wg'][:3, 3] = (
+                best_grasp_pose['T_wg'][:3, 3] + np.array([0.0, 0.0, HOVER_OFFSET])
+            )
 
         else:
             best_grasp_pose = None
