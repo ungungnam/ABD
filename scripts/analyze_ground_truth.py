@@ -33,6 +33,8 @@ def load_episodes(run_dir: Path) -> list[dict]:
         with open(meta_path) as f:
             meta = json.load(f)
         meta["_meta_path"] = str(meta_path)
+        # Store relative folder path: e.g. success/banana_to_pan/episode_000003
+        meta["_ep_path"] = str(meta_path.parent.relative_to(run_dir))
         episodes.append(meta)
     return episodes
 
@@ -48,19 +50,16 @@ def latest_run(data_root: Path) -> Path:
 
 
 def fmt_ep(ep: dict) -> str:
-    run_id  = ep.get("run_id", "?")
-    ep_idx  = ep.get("episode_idx", "?")
-    task    = ep.get("task_name", ep.get("task", "?"))
-    direc   = ep.get("task_direction", "?")
-    success = ep.get("success", "?")
+    ep_path  = ep.get("_ep_path", "?")
+    direc    = ep.get("task_direction", "?")
+    success  = ep.get("success", "?")
     decision = ep.get("policy_decision", "?")
-    score   = None
+    score    = None
     if ep.get("checklist_eval"):
         score = ep["checklist_eval"].get("score")
     score_s = f"score={score:.3f}" if score is not None else "score=n/a"
     return (
-        f"  ep{ep_idx:>3}  [{run_id}]  task={task}  dir={direc}  "
-        f"success={success}  decision={decision}  {score_s}"
+        f"  {ep_path}  dir={direc}  success={success}  decision={decision}  {score_s}"
     )
 
 
