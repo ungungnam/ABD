@@ -350,6 +350,8 @@ class CollectionRunner:
                     ))
                     fail_count = 0
                     if not should_continue:
+                        if not self.is_dummy:
+                            record.ground_truth_reset = self.human_interface.request_ground_truth_label()
                         self.metrics.log_episode(record)
                         if self.dataset_recorder is not None:
                             self.dataset_recorder.save_episode(
@@ -357,6 +359,10 @@ class CollectionRunner:
                                 record=asdict(record),
                             )
                         break
+
+                # Ground truth label (after reset if any, before saving)
+                if not self.is_dummy:
+                    record.ground_truth_reset = self.human_interface.request_ground_truth_label()
 
                 # Save episode data (after record is fully populated incl. reset times)
                 if self.dataset_recorder is not None:

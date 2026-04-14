@@ -18,6 +18,40 @@ from task.task_family import TaskDefinition
 class HumanResetInterface:
     """Terminal-based human reset prompt."""
 
+    def request_ground_truth_label(self) -> int:
+        """Ask the operator whether a reset was actually needed after this episode.
+
+        Returns:
+            1 = reset NOT needed (environment was fine)
+            2 = reset WAS needed (environment needed reset)
+            3 = ambiguous
+        """
+        print()
+        print("-" * 60)
+        print("  GROUND TRUTH LABEL")
+        print("  Was a reset actually needed after this episode?")
+        print("  1 = Not needed  (o)")
+        print("  2 = Needed      (x)")
+        print("  3 = Ambiguous")
+        print("-" * 60)
+        sys.stdout.write("  Label (1/2/3) > ")
+        sys.stdout.flush()
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            while True:
+                r, _, _ = select.select([sys.stdin], [], [])
+                if not r:
+                    continue
+                ch = sys.stdin.read(1)
+                if ch in ("1", "2", "3"):
+                    print()
+                    return int(ch)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
     def request_reset(self, task: TaskDefinition) -> Tuple[bool, float]:
         """Block until human confirms the workspace has been reset.
 
