@@ -271,7 +271,9 @@ class CollectionRunner:
                 else:  # not success and reset_needed
                     decision = "reset"
 
-                print(f"  Policy: success={success}, needs_reset={reset_needed} → {decision}")
+                score = checklist_eval.get("score") if checklist_eval else None
+                score_str = f"{score:.3f}" if score is not None else "n/a"
+                print(f"  Policy: success={success}, score={score_str}, tau={self.policy.tau_reset if hasattr(self.policy, 'tau_reset') else '?'}, needs_reset={reset_needed} → {decision}")
 
                 # Classify failure type
                 failure_type = ""
@@ -366,17 +368,14 @@ class CollectionRunner:
                 self.metrics.log_episode(record)
 
             except KeyboardInterrupt:
-                print("\n\n[비상 정지] Ctrl+C 입력됨. 현재 에피소드를 reset으로 기록하고 run을 종료합니다.")
+                print("\n\n[비상 정지] Ctrl+C 입력됨. 현재 에피소드를 중단하고 run을 종료합니다.")
                 log.warning(f"[EmergencyStop] Episode {ep} interrupted by user (Ctrl+C).")
 
-                # 버퍼에 프레임이 있으면 실패로 저장
+                # 버퍼에 프레임이 있으면 버림 (중단된 에피소드는 저장하지 않음)
                 if self.dataset_recorder is not None:
-                    if self.dataset_recorder._buffer:
-                        self.dataset_recorder.save_episode(task_name=task.name, success=False)
-                    else:
-                        self.dataset_recorder.clear_episode_buffer()
+                    self.dataset_recorder.clear_episode_buffer()
 
-                # 에피소드 실패로 기록
+                # 에피소드 실패로 기록 (human_reset=False: reset 아님)
                 stop_time = time.time()
                 self.manifest.log_episode(
                     episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
@@ -391,19 +390,11 @@ class CollectionRunner:
                     task_name=task.name,
                     task_direction=task_direction,
                     success=False,
-                    policy_decision="next",
+                    policy_decision="aborted",
                     human_reset=False,
                     failure_type="emergency_stop",
                     fail_count=fail_count,
                     episode_duration=stop_time - episode_start_time,
-                ))
-                self.metrics.log_intervention(InterventionRecord(
-                    timestamp=stop_time,
-                    run_id=self.run_id,
-                    episode_idx=ep,
-                    episode_id=episode_id,
-                    intervention_type="emergency_stop",
-                    trigger="Ctrl+C",
                 ))
                 break
 
