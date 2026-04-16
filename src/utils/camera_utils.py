@@ -447,7 +447,7 @@ def _triangulate_tag_world_pose(det_a, det_b):
     return T_wt
 
 
-def detect_tag_world_pose_stereo(cameras, tag_id, decision_margin_min=10.0):
+def detect_tag_world_pose_stereo(cameras, tag_id, tag_size=0.04, decision_margin_min=10.0):
     """Detect AprilTag world pose using stereo triangulation.
 
     Detects the tag in all cameras, picks the best two-camera pair (both see
@@ -458,6 +458,7 @@ def detect_tag_world_pose_stereo(cameras, tag_id, decision_margin_min=10.0):
     Args:
         cameras: dict of {name: camera_object}
         tag_id:  AprilTag ID to detect
+        tag_size: physical tag side length in meters (default 4.0 cm)
         decision_margin_min: detection quality threshold
 
     Returns:
@@ -465,7 +466,8 @@ def detect_tag_world_pose_stereo(cameras, tag_id, decision_margin_min=10.0):
     """
     detections = {}
     for cam_name, camera in cameras.items():
-        det = _detect_tag_in_camera(camera, tag_id, decision_margin_min=decision_margin_min)
+        det = _detect_tag_in_camera(camera, tag_id, tag_size=tag_size,
+                                    decision_margin_min=decision_margin_min)
         if det is not None:
             detections[cam_name] = det
 
@@ -480,7 +482,7 @@ def detect_tag_world_pose_stereo(cameras, tag_id, decision_margin_min=10.0):
         T_wt[2, 3] = det["mono_z"]
         # re-derive full pose from this camera's monocular result
         cam_name = list(detections.keys())[0]
-        return detect_single_tag_world_pose(cameras[cam_name], tag_id,
+        return detect_single_tag_world_pose(cameras[cam_name], tag_id, tag_size=tag_size,
                                              decision_margin_min=decision_margin_min)
 
     return None

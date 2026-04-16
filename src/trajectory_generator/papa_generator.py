@@ -36,6 +36,8 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
     def generate(self, task: TaskDefinition, env) -> GenerationResult:
         if task.task_type == "stack_cups":
             return self._generate_stack_cups(task, env)
+        if task.task_type == "open_drawer":
+            return self._generate_open_drawer(task, env)
         return self._generate_pick_place(task, env)
 
     def _generate_pick_place(self, task: TaskDefinition, env) -> GenerationResult:
@@ -76,10 +78,10 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
                 return GenerationResult(trajectory=None, metadata=metadata)
 
             # 4. Motion planning
-            trajectory, events, key_poses = self.motion_planner.query(
-                vlm_action=action,
+            trajectory, events, key_poses = self.motion_planner.plan_pick_place(
                 pick_perception=pick_perception,
                 place_perception=place_perception,
+                vlm_action=action,
             )
 
             metadata.update({
@@ -100,13 +102,44 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
             metadata["elapsed_time"] = time.time() - start_time
             return GenerationResult(trajectory=None, metadata=metadata)
 
+    def _generate_open_drawer(self, task: TaskDefinition, env) -> GenerationResult:
+        start_time = time.time()
+        metadata = {"generation_failed": False, "elapsed_time": 0.0}
+
+        try:
+            trajectory, events, key_poses = self.motion_planner.plan_open_drawer(
+                pick_tag_id=task.pick_tag_id,
+                stack_step=task.stack_step,
+            )
+
+            if not trajectory:
+                metadata["generation_failed"] = True
+                metadata["reason"] = "apriltag_not_found"
+                metadata["elapsed_time"] = time.time() - start_time
+                return GenerationResult(trajectory=None, metadata=metadata)
+
+            metadata.update({
+                "pick_tag_id": task.pick_tag_id,
+                "stack_step": task.stack_step,
+                "elapsed_time": time.time() - start_time,
+            })
+
+            return GenerationResult(
+                trajectory=trajectory, events=events, metadata=metadata, key_poses=key_poses
+            )
+
+        except Exception as e:
+            metadata["generation_failed"] = True
+            metadata["reason"] = f"exception: {e}"
+            metadata["elapsed_time"] = time.time() - start_time
+            return GenerationResult(trajectory=None, metadata=metadata)
+
     def _generate_stack_cups(self, task: TaskDefinition, env) -> GenerationResult:
         start_time = time.time()
         metadata = {"generation_failed": False, "elapsed_time": 0.0}
 
         try:
-            trajectory, events, key_poses = self.motion_planner.query(
-                task_type="stack_cups",
+            trajectory, events, key_poses = self.motion_planner.plan_stack_cups(
                 pick_tag_id=task.pick_tag_id,
                 place_tag_id=task.place_tag_id,
                 place_xy_offset=task.place_xy_offset,

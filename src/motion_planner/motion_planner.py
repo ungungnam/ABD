@@ -51,6 +51,29 @@ class MotionPlanner():
     _STACK_DROP_EXTRA = 0.05 # extra Z so cup drops naturally onto blue cup
     _GRASP_TILT_Y_DEG = -30   # gripper tilt around Y axis for pick/place (degrees)
 
+    # ---- Drawer constants ----
+    _HANDLE_TAG_OFFSET  = np.array([0.05, 0.035, 0.03])  # handle pos in AprilTag frame (x,y,z)
+    _DRAWER_PULL_DIST   = 0.095    # open/close distance along world X (m)
+    _DRAWER_APPROACH    = 0.08    # pre-pick offset in +X from handle (m)
+
+    _DRAWER_TILT_Y_DEG = +45  # gripper tilt around Y axis for drawer grasp (degrees)
+
+    @classmethod
+    def _drawer_R(cls) -> np.ndarray:
+        """Gripper rotation for drawer handle grasp.
+
+        Base: tip points in +X world (closing direction of drawer).
+        Then tilt _DRAWER_TILT_Y_DEG around Y for a more stable approach angle.
+        """
+        base_R = np.array([[ 0., 0., 1.],
+                            [ 0., 1., 0.],
+                            [-1., 0., 0.]], dtype=np.float64)
+        a = np.deg2rad(cls._DRAWER_TILT_Y_DEG)
+        Ry = np.array([[ np.cos(a), 0., np.sin(a)],
+                       [        0., 1.,         0.],
+                       [-np.sin(a), 0., np.cos(a)]], dtype=np.float64)
+        return Ry @ base_R
+
     @classmethod
     def _grasp_R(cls) -> np.ndarray:
         """Forced gripper rotation with Y-axis tilt applied."""
@@ -61,31 +84,47 @@ class MotionPlanner():
                        [-np.sin(a), 0., np.cos(a)]], dtype=np.float64)
         return Ry @ base_R
 
-    def query(self, pick_perception=None, place_perception=None, vlm_action=None,
-              task_type="pick_place", pick_tag_id=None, place_tag_id=None,
-              place_xy_offset=None, stack_step=None) -> np.ndarray:
-        if task_type == "stack_cups":
-            pick_grasp_pose, place_grasp_pose = self._get_stack_grasp_poses(
-                pick_tag_id, place_tag_id, place_xy_offset, stack_step=stack_step)
-        else:
-            pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.12)
-            place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.12)
+    def _finalize(self, trajectory, events, key_poses):
+        smoothened = smoothen_trajectory(trajectory)
+        partial_trajectory, partial_events = self.get_partial_trajectory(
+            smoothened, events, proportion=1.0)
+        return partial_trajectory, partial_events, key_poses
 
+    def plan_pick_place(self, pick_perception, place_perception, vlm_action=None):
+        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.12)
+        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.12)
         if pick_grasp_pose and place_grasp_pose:
             trajectory, events, key_poses = self.generate_trajectory(
                 vlm_action=vlm_action,
                 pick_grasp_pose=pick_grasp_pose,
-                place_grasp_pose=place_grasp_pose
+                place_grasp_pose=place_grasp_pose,
             )
         else:
+            trajectory, events, key_poses = self.generate_trajectory(vlm_action=vlm_action)
+        return self._finalize(trajectory, events, key_poses)
+
+    def plan_stack_cups(self, pick_tag_id, place_tag_id, place_xy_offset, stack_step, vlm_action=None):
+        pick_grasp_pose, place_grasp_pose = self._get_stack_grasp_poses(
+            pick_tag_id, place_tag_id, place_xy_offset, stack_step=stack_step)
+        if pick_grasp_pose and place_grasp_pose:
             trajectory, events, key_poses = self.generate_trajectory(
-                vlm_action=vlm_action
+                vlm_action=vlm_action,
+                pick_grasp_pose=pick_grasp_pose,
+                place_grasp_pose=place_grasp_pose,
             )
+        else:
+            trajectory, events, key_poses = self.generate_trajectory(vlm_action=vlm_action)
+        return self._finalize(trajectory, events, key_poses)
 
-        smoothened_trajectory = smoothen_trajectory(trajectory)
-        partial_trajectory, partial_events = self.get_partial_trajectory(smoothened_trajectory, events, proportion=1.0)
-
-        return partial_trajectory, partial_events, key_poses
+    def plan_open_drawer(self, pick_tag_id, stack_step):
+        action = "open" if stack_step == "forward" else "close"
+        pick_grasp_pose, place_grasp_pose = self._get_drawer_grasp_poses(pick_tag_id, action=action)
+        if pick_grasp_pose and place_grasp_pose:
+            trajectory, events, key_poses = self.generate_drawer_trajectory(
+                pick_grasp_pose, place_grasp_pose, action=action)
+        else:
+            trajectory, events, key_poses = [], [], []
+        return self._finalize(trajectory, events, key_poses)
 
     def get_reference_object_points(self, perception) -> np.ndarray:
         used_cameras = list(perception.keys())
@@ -661,6 +700,120 @@ class MotionPlanner():
                 T_place_wt, z_offset=place_z, hover_offset=place_hover)
 
         return pick_pose, place_pose
+
+    def _get_drawer_grasp_poses(self, tag_id: int, action: str = "open"):
+        """Compute pick and place poses for the drawer task via AprilTag detection.
+
+        Args:
+            tag_id: AprilTag ID attached to the drawer (tag 7).
+            action: "open"  → pick at handle (closed), place at handle - pull_dist in X
+                    "close" → pick at handle (open),   place at handle + pull_dist in X
+
+        Handle position = T_wt @ _HANDLE_TAG_OFFSET (offset in tag frame).
+        Gripper tip points in +X world (drawer closing direction).
+        Pre-pick hovers approach_dist in +X from handle so the robot comes
+        from the +X side and slides in.
+        """
+        T_wt = None
+        for camera in self.cameras.values():
+            T_wt = detect_single_tag_world_pose(camera, tag_id, tag_size=0.06)
+            if T_wt is not None:
+                break
+        if T_wt is None:
+            T_wt = detect_tag_world_pose_stereo(self.cameras, tag_id)
+        if T_wt is None:
+            log.warning(f"[MotionPlanner] AprilTag {tag_id} not found for drawer task.")
+            return None, None
+
+        # Handle position in world frame
+        p_handle = T_wt[:3, :3] @ self._HANDLE_TAG_OFFSET + T_wt[:3, 3]
+
+        R = self._drawer_R()
+
+        T_pick = np.eye(4, dtype=np.float64)
+        T_pick[:3, :3] = R
+        T_place = np.eye(4, dtype=np.float64)
+        T_place[:3, :3] = R
+
+        if action == "open":
+            # Pick: grasp closed handle
+            T_pick[:3, 3] = p_handle
+            # Place: pull -X (open drawer)
+            T_place[:3, 3] = p_handle + np.array([-self._DRAWER_PULL_DIST, 0.0, 0.0])
+        else:
+            # Pick: open handle position (closed handle - pull_dist), -1cm X buffer, -3cm Z
+            T_pick[:3, 3] = p_handle + np.array([-self._DRAWER_PULL_DIST, 0.0, -0.03])
+            # Place: tag-derived closed handle X, Y/Z same as pick
+            T_place[:3, 3] = np.array([p_handle[0], p_handle[1], p_handle[2] - 0.03])
+
+        pre_T_pick = T_pick.copy()
+        pre_T_pick[:3, 3] = T_pick[:3, 3] + np.array([-0.05, 0.0, 0.0])
+
+        pick_pose  = {"T_wg": T_pick,  "pre_T_wg": pre_T_pick}
+        place_pose = {"T_wg": T_place, "pre_T_wg": T_place.copy()}
+
+        return pick_pose, place_pose
+
+    def generate_drawer_trajectory(
+            self,
+            pick_grasp_pose,
+            place_grasp_pose,
+            action: str = "open",
+            pick_event: str = "CLOSE",
+            place_event: str = "OPEN",
+            ext_len: int = 3,
+    ):
+        """Trajectory for drawer open/close.
+
+        open:  cur → pre_pick → pick → [CLOSE] → place → [OPEN] → post_place → cur
+        close: cur → pre_pick → pick (contact, no grip) → push to place → post_place → cur
+        """
+        def _append(traj, seg):
+            if seg:
+                traj.extend(seg)
+
+        T_cur = self.current_pose()
+        traj_T = []
+        events = []
+
+        pre_pick = pick_grasp_pose["pre_T_wg"]
+        T_pick   = pick_grasp_pose["T_wg"]
+        T_place  = place_grasp_pose["T_wg"]
+
+        # post_place: place 위치에서 X축 -3cm 후퇴
+        post_place = T_place.copy()
+        post_place[:3, 3] = T_place[:3, 3] + np.array([-0.05, 0.0, 0.0])
+
+        key_poses = [pre_pick, T_pick, T_place, post_place]
+
+        # 1) cur → pre_pick
+        _append(traj_T, self._interpolate_poses_linear(T_cur, pre_pick))
+        traj_T = self._prune_duplicates(traj_T)
+
+        # 2) pre_pick → pick (slow horizontal)
+        seg = self._interpolate_poses_linear(traj_T[-1], T_pick, max_step=0.004)
+        _append(traj_T, self._prune_duplicates(seg))
+
+        if action == "open":
+            # 3) dwell + CLOSE
+            _append(traj_T, [traj_T[-1]] * ext_len)
+            events.append({"at": len(traj_T) - 1, "cmd": pick_event})
+
+        # 4) push/pull to place (slow linear along X)
+        seg = self._interpolate_poses_linear(traj_T[-1], T_place, max_step=0.005)
+        _append(traj_T, self._prune_duplicates(seg))
+
+        if action == "open":
+            # 5) dwell + OPEN
+            _append(traj_T, [traj_T[-1]] * ext_len)
+            events.append({"at": len(traj_T) - 1, "cmd": place_event})
+
+        # 6) post_place (-3cm X) → cur (zero position)
+        seg = self._interpolate_poses_linear(traj_T[-1], post_place, max_step=0.005)
+        _append(traj_T, self._prune_duplicates(seg))
+        _append(traj_T, self._interpolate_poses_linear(traj_T[-1], T_cur))
+
+        return traj_T, events, key_poses
 
     def _get_grasp_pose_from_apriltag(self, tag_id, z_offset, hover_offset=0.10, xy_offset=None):
         """Compute grasp pose from a single AprilTag (convenience wrapper)."""

@@ -101,6 +101,36 @@ def build_stack_cups_task_from_config(task_cfg) -> TaskSequence:
     )
 
 
+def build_open_drawer_task_from_config(task_cfg) -> ReversibleTaskPair:
+    """Build a ReversibleTaskPair for the open_drawer task.
+
+    forward: open  the drawer (pull handle -X by pull_dist)
+    reverse: close the drawer (push handle +X by pull_dist)
+
+    Expected config fields:
+        tag_id   : AprilTag ID on the drawer (e.g. 7)
+    """
+    tag_id = int(task_cfg.tag_id)
+
+    forward = TaskDefinition(
+        name="open_drawer",
+        language_task="grab the drawer handle and pull to open the drawer",
+        task_type="open_drawer",
+        canonical_state={"drawer": "open"},
+        pick_tag_id=tag_id,
+        stack_step="forward",
+    )
+    reverse = TaskDefinition(
+        name="close_drawer",
+        language_task="grab the drawer handle and push to close the drawer",
+        task_type="open_drawer",
+        canonical_state={"drawer": "closed"},
+        pick_tag_id=tag_id,
+        stack_step="reverse",
+    )
+    return ReversibleTaskPair(forward=forward, reverse=reverse)
+
+
 def build_task_pair_from_config(task_cfg) -> ReversibleTaskPair:
     """Build a ReversibleTaskPair from a Hydra task config."""
     obj = task_cfg.object

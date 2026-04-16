@@ -15,7 +15,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from env.base_env import ABDBaseEnv
 from task.task_family import TaskScheduler
-from task.task_registry import build_task_pair_from_config, build_stack_cups_task_from_config
+from task.task_registry import build_task_pair_from_config, build_stack_cups_task_from_config, build_open_drawer_task_from_config
 from trajectory_generator.papa_generator import PaPATrajectoryGenerator
 from executor.trajectory_executor import TrajectoryExecutor
 from validator.base_validator import ValidationResult
@@ -101,6 +101,8 @@ class CollectionRunner:
         # Task scheduling
         if config.task.family == "stack_cups":
             task_pair = build_stack_cups_task_from_config(config.task)
+        elif config.task.family == "open_drawer":
+            task_pair = build_open_drawer_task_from_config(config.task)
         else:
             task_pair = build_task_pair_from_config(config.task)
         self.task_scheduler = TaskScheduler(task_pair)
@@ -172,23 +174,24 @@ class CollectionRunner:
         if not self.is_dummy:
             input("\n[Calibration complete] Press Enter to start data collection...")
 
-        # DEBUG: choose starting phase (single keypress, no Enter needed)
-        import sys, tty, termios
-        print("\n[DEBUG] 1: stack (forward) / 2: unstack (reverse) ", end="", flush=True)
-        while True:
-            fd = sys.stdin.fileno()
-            old = termios.tcgetattr(fd)
-            try:
-                tty.setraw(fd)
-                mode = sys.stdin.read(1)
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old)
-            if mode in ("1", "2"):
-                print(mode)
-                break
+        # stack_cups only: choose starting phase (single keypress, no Enter needed)
+        if self.config.task.family == "stack_cups":
+            import sys, tty, termios
+            print("\n[DEBUG] 1: stack (forward) / 2: unstack (reverse) ", end="", flush=True)
+            while True:
+                fd = sys.stdin.fileno()
+                old = termios.tcgetattr(fd)
+                try:
+                    tty.setraw(fd)
+                    mode = sys.stdin.read(1)
+                finally:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                if mode in ("1", "2"):
+                    print(mode)
+                    break
 
-        if mode == "2":
-            self.task_scheduler._idx = self.task_scheduler._n_forward
+            if mode == "2":
+                self.task_scheduler._idx = self.task_scheduler._n_forward
 
         fail_count = 0
 
