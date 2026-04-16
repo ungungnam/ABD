@@ -1,0 +1,64 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "question": "Is the robot in a collision-free and stable configuration?",
+      "weight": 0.4
+    },
+    {
+      "id": 2,
+      "question": "Is the gripper free of visible faults or obstructions?",
+      "weight": 0.4
+    },
+    {
+      "id": 3,
+      "question": "Is the perception system providing reliable and up-to-date scene observations?",
+      "weight": 0.3
+    },
+    {
+      "id": 4,
+      "question": "Are there any hazards or unsafe conditions present in the robot's workspace?",
+      "weight": 0.3
+    },
+    {
+      "id": 5,
+      "question": "Is the pink cup clearly visible in the camera view?",
+      "weight": 0.3
+    },
+    {
+      "id": 6,
+      "question": "Is the pink cup within the robot\u2019s reachable workspace?",
+      "weight": 0.3
+    },
+    {
+      "id": 7,
+      "question": "Is the pink cup physically separable from the purple cup (not jammed or fused)?",
+      "weight": 0.3
+    },
+    {
+      "id": 8,
+      "question": "Is the pink cup in a pose that allows the gripper to securely grasp it?",
+      "weight": 0.2
+    },
+    {
+      "id": 9,
+      "question": "Is the area where the pink cup should be placed free of obstructions?",
+      "weight": 0.2
+    },
+    {
+      "id": 10,
+      "question": "Is there sufficient free space to unstack and move the pink cup safely?",
+      "weight": 0.2
+    },
+    {
+      "id": 11,
+      "question": "Are the pink and purple cups arranged so the pink cup can be lifted without collision?",
+      "weight": 0.2
+    },
+    {
+      "id": 12,
+      "question": "Is the surface for placing the pink cup stable and not slippery or tilted?",
+      "weight": 0.1
+    }
+  ]
+}

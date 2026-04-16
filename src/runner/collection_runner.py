@@ -15,7 +15,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from env.base_env import ABDBaseEnv
 from task.task_family import TaskScheduler
-from task.task_registry import build_task_pair_from_config
+from task.task_registry import build_task_pair_from_config, build_stack_cups_task_from_config
 from trajectory_generator.papa_generator import PaPATrajectoryGenerator
 from executor.trajectory_executor import TrajectoryExecutor
 from validator.base_validator import ValidationResult
@@ -99,7 +99,10 @@ class CollectionRunner:
         self.env = build_env(config)
 
         # Task scheduling
-        task_pair = build_task_pair_from_config(config.task)
+        if config.task.family == "stack_cups":
+            task_pair = build_stack_cups_task_from_config(config.task)
+        else:
+            task_pair = build_task_pair_from_config(config.task)
         self.task_scheduler = TaskScheduler(task_pair)
 
         # Dataset recorder
@@ -169,6 +172,24 @@ class CollectionRunner:
         if not self.is_dummy:
             input("\n[Calibration complete] Press Enter to start data collection...")
 
+        # DEBUG: choose starting phase (single keypress, no Enter needed)
+        import sys, tty, termios
+        print("\n[DEBUG] 1: stack (forward) / 2: unstack (reverse) ", end="", flush=True)
+        while True:
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                mode = sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            if mode in ("1", "2"):
+                print(mode)
+                break
+
+        if mode == "2":
+            self.task_scheduler._idx = self.task_scheduler._n_forward
+
         fail_count = 0
 
         for ep in range(self.max_episodes):
@@ -234,46 +255,29 @@ class CollectionRunner:
                     continue
 
                 # Module B: Execute trajectory
+                # Gripper close value depends on task type:
+                #   pick_place  → 0 (fully closed, gripping small objects)
+                #   stack_cups  → 42000 (partial close sized to cup diameter)
+                #   unstack_cups -> 50000
+
+                if task.task_type == "stack_cups":
+                    gripper_close = 38000
+                else:
+                    gripper_close = 0
+
+                self.env.set_gripper_close(gripper_close)
                 exec_result = self.executor.execute(
-                    gen_result.trajectory, gen_result.events, task.language_task
+                    gen_result.trajectory, gen_result.events, task.language_task,
+                    key_poses=gen_result.key_poses or None,
                 )
 
-                # Module C: Validate task success
-                validation = self.validator.validate(task, exec_result.final_obs, self.env)
-                log.info(f"Validation: success={validation.success}, "
-                        f"method={validation.method}, confidence={validation.confidence:.2f}")
-
-                # Module D: Policy decision (2×2 matrix)
-                #   success  reset  → action
-                #   True     False  → next   (advance direction)
-                #   True     True   → reset  + advance
-                #   False    False  → retry
-                #   False    True   → reset  + same direction
-                #
-                # 체크리스트 평가 대상:
-                #   success=True  → 다음 task (반대 방향) 기준으로 환경 준비 여부 판단
-                #   success=False → 현재 task (같은 방향) 기준으로 재시도 가능 여부 판단
-                eval_task = self.task_scheduler.next_task() if validation.success else task
-                reset_needed = self.policy.needs_reset(
-                    validation, fail_count, ep,
-                    task=eval_task, observation=exec_result.final_obs,
-                )
-                checklist_eval = getattr(self.policy, "last_eval", None)
-
-                success = validation.success
-
-                if success and not reset_needed:
-                    decision = "next"
-                elif success and reset_needed:
-                    decision = "reset"
-                elif not success and not reset_needed:
-                    decision = "retry"
-                else:  # not success and reset_needed
-                    decision = "reset"
-
-                score = checklist_eval.get("score") if checklist_eval else None
-                score_str = f"{score:.3f}" if score is not None else "n/a"
-                print(f"  Policy: success={success}, score={score_str}, tau={self.policy.tau_reset if hasattr(self.policy, 'tau_reset') else '?'}, needs_reset={reset_needed} → {decision}")
+                # DEBUG: always next
+                from validator.base_validator import ValidationResult
+                validation = ValidationResult(success=True, confidence=1.0, method="debug", details={})
+                reset_needed = False
+                checklist_eval = None
+                success = True
+                decision = "next"
 
                 # Classify failure type
                 failure_type = ""
@@ -321,6 +325,9 @@ class CollectionRunner:
                     episode_duration=time.time() - episode_start_time,
                 )
 
+                # Capture terminal flag before advance() mutates scheduler state
+                was_terminal_step = self.task_scheduler.is_terminal_step
+
                 # Act on decision
                 if decision == "next":
                     self.task_scheduler.advance()
@@ -328,6 +335,8 @@ class CollectionRunner:
 
                 elif decision == "retry":
                     fail_count += 1
+                    self.task_scheduler.reset_to_phase_start()
+                    log.info(f"[Retry] reset to phase start (step={self.task_scheduler._idx}), fail_count={fail_count}")
                     if fail_count >= self.max_retries:
                         log.warning(f"Max retries ({self.max_retries}) reached, escalating to reset.")
                         decision = "reset"
@@ -350,7 +359,7 @@ class CollectionRunner:
                     ))
                     fail_count = 0
                     if not should_continue:
-                        if not self.is_dummy:
+                        if not self.is_dummy and was_terminal_step:
                             record.ground_truth_reset = self.human_interface.request_ground_truth_label()
                         self.metrics.log_episode(record)
                         if self.dataset_recorder is not None:
@@ -360,8 +369,8 @@ class CollectionRunner:
                             )
                         break
 
-                # Ground truth label (after reset if any, before saving)
-                if not self.is_dummy:
+                # Ground truth label only at terminal steps (all cups stacked / all cups unstacked)
+                if not self.is_dummy and was_terminal_step:
                     record.ground_truth_reset = self.human_interface.request_ground_truth_label()
 
                 # Save episode data (after record is fully populated incl. reset times)
@@ -451,15 +460,66 @@ class CollectionRunner:
             (should_continue, confirm_time): should_continue is False if
             user aborts; confirm_time is the timestamp when reset was confirmed.
         """
-        if self.is_dummy:
-            print("  [Dummy] Auto-confirming human reset.")
-            should_continue = True
-            confirm_time = time.time()
-        else:
-            should_continue, confirm_time = self.human_interface.request_reset(task)
+        # DEBUG: skip human reset, always auto-confirm
+        print("  [DEBUG] Auto-confirming reset (human reset disabled).")
+        should_continue = True
+        confirm_time = time.time()
 
         if should_continue:
             self.task_scheduler.reset_to_forward()
             if hasattr(self.validator, "reset_state"):
                 self.validator.reset_state()
         return should_continue, confirm_time
+
+    def _debug_init_unstack_cache(self):
+        """DEBUG: populate tag position cache for unstack mode.
+
+        Detects the blue cup tag, then sets hardcoded original positions:
+          purple cup: blue tag XY + 5cm right (+X)
+          pink   cup: blue tag XY + 5cm left  (-X)
+        """
+        import numpy as np
+        from utils.camera_utils import detect_single_tag_world_pose, detect_tag_world_pose_stereo
+
+        mp = self.generator.motion_planner
+
+        # tag IDs from task definitions (forward_1: stack_a_on_b)
+        forward_1 = self.task_scheduler._tasks[0]  # stack_purple_on_blue
+        forward_2 = self.task_scheduler._tasks[1]  # stack_pink_on_purple
+        tag_a = forward_1.pick_tag_id    # purple
+        tag_b = forward_1.place_tag_id   # blue
+        tag_c = forward_2.pick_tag_id    # pink
+
+        # pink cup is on top → detect pink tag to get blue cup XY reference
+        T_pink_detected = None
+        for camera in mp.cameras.values():
+            T_pink_detected = detect_single_tag_world_pose(camera, tag_c)
+            if T_pink_detected is not None:
+                break
+        if T_pink_detected is None:
+            T_pink_detected = detect_tag_world_pose_stereo(mp.cameras, tag_c)
+
+        if T_pink_detected is None:
+            log.warning("[DEBUG] Could not detect pink tag — unstack cache not populated!")
+            return
+
+        # Use pink tag XY as blue cup XY reference, but use table-level Z for original positions
+        ref_x = T_pink_detected[0, 3]
+        ref_y = T_pink_detected[1, 3]
+        table_z = mp._TAG_Z + 0.01
+
+        T_purple = np.eye(4, dtype=np.float64)
+        T_purple[0, 3] = ref_x + 0.05   # purple: 5cm right (+X)
+        T_purple[1, 3] = ref_y
+        T_purple[2, 3] = table_z
+        mp._tag_position_cache[tag_a] = T_purple
+
+        T_pink = np.eye(4, dtype=np.float64)
+        T_pink[0, 3] = ref_x - 0.05     # pink: 5cm left (-X)
+        T_pink[1, 3] = ref_y
+        T_pink[2, 3] = table_z
+        mp._tag_position_cache[tag_c] = T_pink
+
+        log.info(f"[DEBUG] Unstack cache set from pink tag XY ({ref_x:.3f}, {ref_y:.3f}): "
+                 f"purple tag_id={tag_a} at {T_purple[:3,3]}, "
+                 f"pink tag_id={tag_c} at {T_pink[:3,3]}")

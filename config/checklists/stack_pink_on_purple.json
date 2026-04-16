@@ -1,0 +1,64 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "question": "Is the robot in a collision-free and safe configuration?",
+      "weight": 0.5
+    },
+    {
+      "id": 2,
+      "question": "Is the gripper intact and functioning correctly?",
+      "weight": 0.4
+    },
+    {
+      "id": 3,
+      "question": "Is the perception system providing clear and reliable sensor data?",
+      "weight": 0.4
+    },
+    {
+      "id": 4,
+      "question": "Are there any immediate hazards or dangerous objects present in the workspace?",
+      "weight": 0.3
+    },
+    {
+      "id": 5,
+      "question": "Is the pink cup clearly visible to the perception system?",
+      "weight": 0.3
+    },
+    {
+      "id": 6,
+      "question": "Is the purple cup clearly visible to the perception system?",
+      "weight": 0.3
+    },
+    {
+      "id": 7,
+      "question": "Is the pink cup within the robot's reachable workspace?",
+      "weight": 0.3
+    },
+    {
+      "id": 8,
+      "question": "Is the pink cup in a state where it can be securely grasped?",
+      "weight": 0.3
+    },
+    {
+      "id": 9,
+      "question": "Is the purple cup in a position compatible for stacking another cup on top?",
+      "weight": 0.2
+    },
+    {
+      "id": 10,
+      "question": "Can the pink cup be accessed without being blocked by other objects?",
+      "weight": 0.2
+    },
+    {
+      "id": 11,
+      "question": "Is there sufficient free space above and around the purple cup for stacking the pink cup?",
+      "weight": 0.2
+    },
+    {
+      "id": 12,
+      "question": "Is the area around the purple cup stable and free from movement or shaking?",
+      "weight": 0.1
+    }
+  ]
+}

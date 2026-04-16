@@ -362,3 +362,165 @@ def estimate_T_ct_from_apriltag(
 
     quality = float(np.mean(w_kept)) if w_kept else 0.0
     return T_cb_mean, quality
+
+
+def _detect_tag_in_camera(camera, tag_id, tag_size=0.04, decision_margin_min=10.0):
+    """Detect a tag in one camera. Returns corners (2D) AND monocular Z.
+
+    Captures rgb + T_wc in a single snapshot so wrist-camera FK is consistent.
+
+    Returns dict with:
+        'corners' (4,2) pixel coords
+        'K'       (3,3) intrinsic
+        'T_wc'    (4,4) camera→world  (snapshot at capture time)
+        'mono_z'  float  tag center Z in world frame from monocular pose
+    or None if tag not found.
+    """
+    rgb = camera.get_rgb()
+    K = camera.get_intrinsic_matrix()
+    T_wc = camera.get_extrinsic_matrix()   # FK evaluated once here
+
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+
+    # Detect with pose estimation to get monocular Z
+    dets = _APRILTAG_DETECTOR.detect(
+        gray,
+        estimate_tag_pose=True,
+        camera_params=(float(K[0, 0]), float(K[1, 1]), float(K[0, 2]), float(K[1, 2])),
+        tag_size=float(tag_size),
+    )
+
+    for d in dets:
+        if int(d.tag_id) != tag_id:
+            continue
+        if float(getattr(d, "decision_margin", 0.0)) < decision_margin_min:
+            continue
+
+        corners = np.asarray(d.corners, dtype=np.float64)  # (4,2)
+
+        # Monocular tag center in world frame → extract Z
+        R = np.asarray(d.pose_R, dtype=np.float64)
+        t = np.asarray(d.pose_t, dtype=np.float64).reshape(3)
+        T_ct = rt_to_transform_matrix(R, t)
+        T_wt_mono = T_wc @ T_ct
+        mono_z = float(T_wt_mono[2, 3])
+
+        return {"corners": corners, "K": K, "T_wc": T_wc, "mono_z": mono_z}
+
+    return None
+
+
+def _triangulate_tag_world_pose(det_a, det_b):
+    """Hybrid triangulation: stereo XY + monocular Z.
+
+    XY from cv2.triangulatePoints (accurate with horizontal baseline).
+    Z from monocular depth estimate of the better-quality detection
+    (monocular depth is more reliable when cameras share similar heights).
+
+    Args:
+        det_a, det_b: dicts from _detect_tag_in_camera
+
+    Returns:
+        T_wt: (4,4) tag-to-world transform
+    """
+    def proj_matrix(K, T_wc):
+        T_cw = inverse_transform(T_wc)
+        return K @ T_cw[:3, :]
+
+    P_a = proj_matrix(det_a["K"], det_a["T_wc"])
+    P_b = proj_matrix(det_b["K"], det_b["T_wc"])
+
+    pts_a = det_a["corners"].T  # (2,4)
+    pts_b = det_b["corners"].T  # (2,4)
+
+    pts4d = cv2.triangulatePoints(P_a, P_b, pts_a, pts_b)  # (4,4) homogeneous
+    pts3d = (pts4d[:3] / pts4d[3]).T  # (4,3) world coords
+
+    # XY from stereo, Z from monocular average
+    center_xy = pts3d.mean(axis=0)[:2]
+    mono_z = (det_a["mono_z"] + det_b["mono_z"]) / 2.0
+
+    center = np.array([center_xy[0], center_xy[1], mono_z])
+
+    T_wt = np.eye(4, dtype=np.float64)
+    T_wt[:3, 3] = center
+    return T_wt
+
+
+def detect_tag_world_pose_stereo(cameras, tag_id, decision_margin_min=10.0):
+    """Detect AprilTag world pose using stereo triangulation.
+
+    Detects the tag in all cameras, picks the best two-camera pair (both see
+    the tag), and triangulates the 4 corner positions in 3D for accuracy.
+    Falls back to single-camera monocular estimation if only one camera sees
+    the tag.
+
+    Args:
+        cameras: dict of {name: camera_object}
+        tag_id:  AprilTag ID to detect
+        decision_margin_min: detection quality threshold
+
+    Returns:
+        T_wt: (4,4) tag-to-world transform, or None if not detected
+    """
+    detections = {}
+    for cam_name, camera in cameras.items():
+        det = _detect_tag_in_camera(camera, tag_id, decision_margin_min=decision_margin_min)
+        if det is not None:
+            detections[cam_name] = det
+
+    if len(detections) >= 2:
+        cam_names = list(detections.keys())
+        return _triangulate_tag_world_pose(detections[cam_names[0]], detections[cam_names[1]])
+
+    if len(detections) == 1:
+        # Fallback: monocular only
+        det = list(detections.values())[0]
+        T_wt = np.eye(4, dtype=np.float64)
+        T_wt[2, 3] = det["mono_z"]
+        # re-derive full pose from this camera's monocular result
+        cam_name = list(detections.keys())[0]
+        return detect_single_tag_world_pose(cameras[cam_name], tag_id,
+                                             decision_margin_min=decision_margin_min)
+
+    return None
+
+
+def detect_single_tag_world_pose(camera, tag_id, tag_size=0.03, decision_margin_min=10.0):
+    """Detect a specific AprilTag and return its pose in world frame (monocular).
+
+    Prefer detect_tag_world_pose_stereo() when multiple cameras are available.
+
+    Args:
+        camera: camera object with get_rgb(), get_intrinsic_matrix(), get_extrinsic_matrix()
+        tag_id: int, the tag ID to find
+        tag_size: float, physical tag side length in meters (default 4.0 cm)
+        decision_margin_min: minimum detection quality threshold
+
+    Returns:
+        T_wt: (4,4) ndarray transforming points from tag frame to world frame,
+              or None if the tag is not detected.
+    """
+    rgb = camera.get_rgb()
+    K = camera.get_intrinsic_matrix()
+    T_wc = camera.get_extrinsic_matrix()
+
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    dets = _APRILTAG_DETECTOR.detect(
+        gray,
+        estimate_tag_pose=True,
+        camera_params=(float(K[0, 0]), float(K[1, 1]), float(K[0, 2]), float(K[1, 2])),
+        tag_size=float(tag_size),
+    )
+
+    for d in dets:
+        if int(d.tag_id) != tag_id:
+            continue
+        if float(getattr(d, "decision_margin", 0.0)) < decision_margin_min:
+            continue
+        R = np.asarray(d.pose_R, dtype=np.float64)
+        t = np.asarray(d.pose_t, dtype=np.float64).reshape(3)
+        T_ct = rt_to_transform_matrix(R, t)  # tag -> camera
+        return T_wc @ T_ct                    # tag -> world
+
+    return None

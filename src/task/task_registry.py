@@ -1,4 +1,104 @@
-from task.task_family import TaskDefinition, ReversibleTaskPair
+from task.task_family import TaskDefinition, ReversibleTaskPair, TaskSequence
+
+
+def build_stack_cups_task_from_config(task_cfg) -> TaskSequence:
+    """Build a TaskSequence for stack_cups from config.
+
+    2-cup mode (cup_a + cup_b only):
+        forward:  stack cup_a on cup_b
+        reverse:  unstack cup_a back to original position
+
+    3-cup mode (cup_a + cup_b + cup_c):
+        forward:  stack cup_a on cup_b  →  stack cup_c on cup_a
+        reverse:  unstack cup_c         →  unstack cup_a
+
+    Expected config fields:
+        cup_a, cup_b, tag_id_a, tag_id_b  : first two cups (required)
+        cup_c, tag_id_c                   : third cup (optional)
+    """
+    cup_a = task_cfg.cup_a
+    cup_b = task_cfg.cup_b
+    tag_a = int(task_cfg.tag_id_a)
+    tag_b = int(task_cfg.tag_id_b)
+
+    has_third = hasattr(task_cfg, "cup_c") and hasattr(task_cfg, "tag_id_c")
+
+    # Sentinel used for unstack tasks to trigger cache-based place logic
+    _UNSTACK = [0, 0]
+
+    # --- forward step 1: stack cup_a on cup_b ---
+    stack_a_on_b = TaskDefinition(
+        name=f"stack_{cup_a}_on_{cup_b}",
+        language_task=f"pick up the {cup_a} cup and stack it on the {cup_b} cup",
+        task_type="stack_cups",
+        canonical_state={"pick": cup_a, "place": cup_b},
+        pick_tag_id=tag_a,
+        place_tag_id=tag_b,
+        stack_step="forward_1",
+    )
+
+    if not has_third:
+        # --- 2-cup: 1 forward + 1 reverse ---
+        unstack_a = TaskDefinition(
+            name=f"unstack_{cup_a}_from_{cup_b}",
+            language_task=f"pick up the {cup_a} cup from the {cup_b} cup and place it in its original position",
+            task_type="stack_cups",
+            canonical_state={"pick": cup_a, "place": cup_b},
+            pick_tag_id=tag_a,
+            place_xy_offset=_UNSTACK,
+            stack_step="reverse_1",
+        )
+        return TaskSequence(tasks=[stack_a_on_b, unstack_a], n_forward=1)
+
+    # --- 3-cup mode ---
+    cup_c = task_cfg.cup_c
+    tag_c = int(task_cfg.tag_id_c)
+
+    # forward step 2: stack cup_c on cup_a (cup_a is now on cup_b) — TERMINAL forward step
+    stack_c_on_a = TaskDefinition(
+        name=f"stack_{cup_c}_on_{cup_a}",
+        language_task=f"pick up the {cup_c} cup and stack it on the {cup_a} cup",
+        task_type="stack_cups",
+        canonical_state={"pick": cup_c, "place": cup_a},
+        pick_tag_id=tag_c,
+        place_tag_id=tag_a,
+        stack_step="forward_2",
+        validation_question=(
+            f"Are all three cups stacked on top of each other: "
+            f"{cup_c} on {cup_a} on {cup_b}?"
+        ),
+    )
+
+    # reverse step 1: unstack cup_c back to its original position
+    unstack_c = TaskDefinition(
+        name=f"unstack_{cup_c}",
+        language_task=f"pick up the {cup_c} cup from the {cup_a} cup and place it in its original position",
+        task_type="stack_cups",
+        canonical_state={"pick": cup_c, "place": cup_a},
+        pick_tag_id=tag_c,
+        place_xy_offset=_UNSTACK,
+        stack_step="reverse_1",
+    )
+
+    # reverse step 2: unstack cup_a back to its original position — TERMINAL reverse step
+    unstack_a = TaskDefinition(
+        name=f"unstack_{cup_a}",
+        language_task=f"pick up the {cup_a} cup from the {cup_b} cup and place it in its original position",
+        task_type="stack_cups",
+        canonical_state={"pick": cup_a, "place": cup_b},
+        pick_tag_id=tag_a,
+        place_xy_offset=_UNSTACK,
+        stack_step="reverse_2",
+        validation_question=(
+            f"Are the {cup_c} cup and the {cup_a} cup both on the table and "
+            f"NOT stacked on top of any other cup?"
+        ),
+    )
+
+    return TaskSequence(
+        tasks=[stack_a_on_b, stack_c_on_a, unstack_c, unstack_a],
+        n_forward=2,
+    )
 
 
 def build_task_pair_from_config(task_cfg) -> ReversibleTaskPair:

@@ -1,0 +1,7 @@
+family: stack_cups
+cup_a: "purple"              # 1st pick 컵 (tag_id_a)
+cup_b: "blue"                # base 컵 (tag_id_b)
+cup_c: "pink"                # 2nd pick 컵 (tag_id_c) — 3-cup 모드
+tag_id_a: 5                  # 보라색 컵 AprilTag ID
+tag_id_b: 4                  # 파란색 컵 AprilTag ID
+tag_id_c: 6                  # 핑크색 컵 AprilTag ID

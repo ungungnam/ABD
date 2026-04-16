@@ -13,6 +13,7 @@ class GenerationResult:
     trajectory: Optional[List[np.ndarray]]   # list of 4x4 SE(3) waypoints, or None on failure
     events: List[dict] = field(default_factory=list)  # [{"at": idx, "cmd": "CLOSE"}, ...]
     metadata: dict = field(default_factory=dict)
+    key_poses: List[np.ndarray] = field(default_factory=list)  # [pre_pick, pick, pre_place, place] — IK fallback targets
 
 
 class BaseTrajectoryGenerator(ABC):

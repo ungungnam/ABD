@@ -93,19 +93,19 @@ class Piper:
         return fk_wrapper
 
     def _close_gripper(self):
-        self.piper.GripperCtrl(0,1000,0x01, 0)
+        self.piper.GripperCtrl(42000, 300, 0x01, 0)
 
     def _open_gripper(self):
-        self.piper.GripperCtrl(70000,1000,0x01, 0)
+        self.piper.GripperCtrl(70000, 300, 0x01, 0)
 
     def _control_joint(self, joints):
         self.piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
         self.piper.JointCtrl(joints[0], joints[1], joints[2],joints[3],joints[4],joints[5])
-        self.piper.GripperCtrl(joints[6], 1000, 0x01, 0)
+        self.piper.GripperCtrl(joints[6], 300, 0x01, 0)
         time.sleep(0.005)
 
     def _control_end_pose(self, end_pose):
         self.piper.MotionCtrl_2(0x01, 0x00, 100, 0x00)
         self.piper.EndPoseCtrl(end_pose[0], end_pose[1], end_pose[2], end_pose[3], end_pose[4], end_pose[5])
-        self.piper.GripperCtrl(end_pose[6], 1000, 0x01, 0)
+        self.piper.GripperCtrl(end_pose[6], 300, 0x01, 0)
         time.sleep(0.01)

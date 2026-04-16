@@ -34,6 +34,11 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
         self.max_perception_retries = 10
 
     def generate(self, task: TaskDefinition, env) -> GenerationResult:
+        if task.task_type == "stack_cups":
+            return self._generate_stack_cups(task, env)
+        return self._generate_pick_place(task, env)
+
+    def _generate_pick_place(self, task: TaskDefinition, env) -> GenerationResult:
         start_time = time.time()
         metadata = {"generation_failed": False, "elapsed_time": 0.0}
 
@@ -71,7 +76,7 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
                 return GenerationResult(trajectory=None, metadata=metadata)
 
             # 4. Motion planning
-            trajectory, events = self.motion_planner.query(
+            trajectory, events, key_poses = self.motion_planner.query(
                 vlm_action=action,
                 pick_perception=pick_perception,
                 place_perception=place_perception,
@@ -86,7 +91,42 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
             })
 
             return GenerationResult(
-                trajectory=trajectory, events=events, metadata=metadata
+                trajectory=trajectory, events=events, metadata=metadata, key_poses=key_poses
+            )
+
+        except Exception as e:
+            metadata["generation_failed"] = True
+            metadata["reason"] = f"exception: {e}"
+            metadata["elapsed_time"] = time.time() - start_time
+            return GenerationResult(trajectory=None, metadata=metadata)
+
+    def _generate_stack_cups(self, task: TaskDefinition, env) -> GenerationResult:
+        start_time = time.time()
+        metadata = {"generation_failed": False, "elapsed_time": 0.0}
+
+        try:
+            trajectory, events, key_poses = self.motion_planner.query(
+                task_type="stack_cups",
+                pick_tag_id=task.pick_tag_id,
+                place_tag_id=task.place_tag_id,
+                place_xy_offset=task.place_xy_offset,
+                stack_step=task.stack_step,
+            )
+
+            if trajectory is None:
+                metadata["generation_failed"] = True
+                metadata["reason"] = "apriltag_not_found"
+                metadata["elapsed_time"] = time.time() - start_time
+                return GenerationResult(trajectory=None, metadata=metadata)
+
+            metadata.update({
+                "pick_tag_id": task.pick_tag_id,
+                "place_tag_id": task.place_tag_id,
+                "elapsed_time": time.time() - start_time,
+            })
+
+            return GenerationResult(
+                trajectory=trajectory, events=events, metadata=metadata, key_poses=key_poses
             )
 
         except Exception as e:
