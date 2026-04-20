@@ -93,6 +93,13 @@ class MetricsLogger:
     def cumulative_valid_trajectories(self) -> int:
         return sum(1 for e in self.episodes if e.success)
 
+    def cumulative_gen_failures(self) -> int:
+        return sum(1 for e in self.episodes if not e.generation_success)
+
+    def cumulative_execution_attempts(self) -> int:
+        """Episodes that reached execution (gen succeeded)."""
+        return sum(1 for e in self.episodes if e.generation_success)
+
     def interventions_per_hour(self) -> float:
         if self.start_time is None or not self.episodes:
             return 0.0
@@ -177,7 +184,9 @@ class MetricsLogger:
         summary = {
             "run_id": self.run_id,
             "policy_method": self.policy_method,
-            "total_episodes": len(self.episodes),
+            "total_attempts": len(self.episodes),
+            "gen_failures": self.cumulative_gen_failures(),
+            "execution_attempts": self.cumulative_execution_attempts(),
             "total_successes": self.cumulative_valid_trajectories(),
             "success_rate": self.cumulative_success_rate(),
             "interventions": sum(1 for e in self.episodes if e.human_reset),

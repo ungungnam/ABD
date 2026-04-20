@@ -16,6 +16,9 @@ class TaskDefinition:
     place_xy_offset: Optional[list] = None # non-None → unstack mode (use cached position)
     validation_question: Optional[str] = None  # Override VLM validation question for terminal steps
     stack_step: Optional[str] = None       # "forward_1" | "forward_2" | "reverse_1" | "reverse_2"
+    # Intermediate tag check (stack_cups only): run before execution of this step
+    intermediate_check_tag_id: Optional[int] = None   # tag to detect
+    intermediate_check_skip_if_visible: bool = True    # True → skip if tag visible; False → skip if tag hidden
 
 
 @dataclass

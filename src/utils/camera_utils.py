@@ -364,7 +364,7 @@ def estimate_T_ct_from_apriltag(
     return T_cb_mean, quality
 
 
-def _detect_tag_in_camera(camera, tag_id, tag_size=0.04, decision_margin_min=10.0):
+def _detect_tag_in_camera(camera, tag_id, tag_size=0.03, decision_margin_min=10.0):
     """Detect a tag in one camera. Returns corners (2D) AND monocular Z.
 
     Captures rgb + T_wc in a single snapshot so wrist-camera FK is consistent.
@@ -447,7 +447,7 @@ def _triangulate_tag_world_pose(det_a, det_b):
     return T_wt
 
 
-def detect_tag_world_pose_stereo(cameras, tag_id, tag_size=0.04, decision_margin_min=10.0):
+def detect_tag_world_pose_stereo(cameras, tag_id, tag_size=0.03, decision_margin_min=10.0):
     """Detect AprilTag world pose using stereo triangulation.
 
     Detects the tag in all cameras, picks the best two-camera pair (both see

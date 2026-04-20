@@ -27,11 +27,9 @@ class VLMValidator(BaseTaskValidator):
             pick_cup  = task.canonical_state.get("pick", "purple")
             place_cup = task.canonical_state.get("place", "blue")
             if task.place_xy_offset:  # unstack
-                question = (
-                    "Are any of the three cups still stacked on top of another cup?"
-                )
+                question = "Are all 3 cups (purple, pink, and blue) completely separate from each other?"
             else:  # stack
-                question = f"Are all three cups fully stacked together?"
+                question = "Are all 3 cups (purple, pink, and blue) fully stacked together?"
         elif task.task_type == "open_drawer":
             drawer_state = task.canonical_state.get("drawer", "open")
             if drawer_state == "open":
@@ -47,16 +45,14 @@ class VLMValidator(BaseTaskValidator):
             question = f"Is the {obj_name} placed {prep} the {target_name}?"
 
         log.info(f"[VLMValidator] task={task.name} | query: {question}")
-        raw = self.vqa_client.ask_yes_no(post_obs, question)
-
-        # Unstack queries use negative framing ("Are any cups still stacked?")
-        # so the success condition is the opposite: No → success, Yes → failure.
-        invert = (
-            task.task_type == "stack_cups"
-            and task.stack_step.startswith("reverse")
+        obs = (
+            {k: v for k, v in post_obs.items() if "wrist" not in k}
+            if task.task_type == "stack_cups" else post_obs
         )
-        success = (not raw) if invert else raw
-        log.info(f"[VLMValidator] raw={raw} invert={invert} → success={success}")
+        raw = self.vqa_client.ask_yes_no(obs, question)
+
+        success = raw
+        log.info(f"[VLMValidator] raw={raw} → success={success}")
 
         # stack_cups terminal step: if VQA says task failed, the scene is no longer
         # in its initial state (cups partially stacked/unstacked) and needs human reset.

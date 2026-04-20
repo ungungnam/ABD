@@ -67,7 +67,7 @@ class TrajectoryExecutor:
 
         obs = self.env.get_observation()
 
-        ik_indices = self._key_indices(trajectory, key_poses) if key_poses else None
+        ik_indices = self._key_indices(trajectory, key_poses) if key_poses is not None else None
         log.debug(f"[IK Fallback] key waypoint indices: {sorted(ik_indices) if ik_indices else 'all'}")
 
         for i, waypoint in enumerate(trajectory):

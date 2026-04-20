@@ -63,7 +63,7 @@ def build_stack_cups_task_from_config(task_cfg) -> TaskSequence:
         pick_tag_id=tag_c,
         place_tag_id=tag_a,
         stack_step="forward_2",
-        validation_question="Are all the cups stacked on top of each other?",
+        validation_question="Are all 3 cups (purple, pink, and blue) fully stacked together?",
     )
 
     # reverse step 1: unstack cup_c back to its original position
@@ -88,7 +88,7 @@ def build_stack_cups_task_from_config(task_cfg) -> TaskSequence:
         place_tag_id=tag_a,
         place_xy_offset=_UNSTACK,
         stack_step="reverse_2",
-        validation_question="Are any of the three cups still stacked on top of another cup?",
+        validation_question="Are all 3 cups (purple, pink, and blue) completely separate from each other?",
         # If purple tag (tag_a) is NOT visible → cup_c still on cup_a → reverse_1 failed
         # intermediate_check_tag_id=tag_a,
         # intermediate_check_skip_if_visible=False,

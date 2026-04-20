@@ -433,8 +433,8 @@ class CollectionRunner:
                 # Act on decision
                 if decision == "next":
                     self.task_scheduler.advance()
-                    fail_count = 0
                     if was_terminal_step:
+                        fail_count = 0
                         ep += 1
 
                 elif decision == "retry":
@@ -488,7 +488,15 @@ class CollectionRunner:
                         success, record, decision,
                     )
 
-                self.metrics.log_episode(record)
+                # stack_cups 비터미널 auto_advance 스텝은 metrics에 기록하지 않음
+                # (forward_1, reverse_1은 에피소드의 일부로 terminal 스텝에서 함께 기록)
+                _is_accumulating_step = (
+                    task.task_type == "stack_cups"
+                    and not was_terminal_step
+                    and decision == "next"
+                )
+                if not _is_accumulating_step:
+                    self.metrics.log_episode(record)
 
             except Exception as exc:
                 _task_name = task.name if "task" in locals() else "?"
@@ -535,9 +543,12 @@ class CollectionRunner:
         if self.dataset_recorder is not None:
             self.dataset_recorder.finalize()
 
+        n_gen_fail = self.metrics.cumulative_gen_failures()
+        n_exec     = self.metrics.cumulative_execution_attempts()
         print(f"\n{'='*60}")
         print(f"Collection complete: {self.metrics.cumulative_valid_trajectories()} "
-              f"valid trajectories in {len(self.metrics.episodes)} episodes")
+              f"valid trajectories in {n_exec} execution attempts "
+              f"({n_gen_fail} gen failures)")
         print(f"Success rate: {self.metrics.cumulative_success_rate():.1%}")
         print(f"Human resets: {sum(1 for e in self.metrics.episodes if e.human_reset)}")
         print(f"Failure types: {self.metrics.failure_type_distribution()}")

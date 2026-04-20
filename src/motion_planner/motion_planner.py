@@ -44,10 +44,10 @@ class MotionPlanner():
     _CUP_HEIGHT       = 0.09    # 9 cm
     _TABLE_Z          = -0.063  # table surface Z in robot base frame (measured)
     _TAG_Z            = _TABLE_Z + _CUP_HEIGHT  # = 0.027 m — fixed tag height
-    _GRASP_BELOW_TAG  = 0.015   # gripper TIP offset below tag
+    _GRASP_BELOW_TAG  = 0.025   # gripper TIP offset below tag
     _GRASP_BELOW_TAG_unstack  = 0.020 
-    _PICK_TAG_XY_OFFSET  = [ 0.0,  0.01]  # pick correction: +1 cm in Y (robot-left)
-    _PLACE_TAG_XY_OFFSET = [-0.01, 0.01]  # place correction: -1 cm in X (toward robot), +1 cm in Y
+    _PICK_TAG_XY_OFFSET  = [ 0.0,  0.0]   # pick correction: no offset
+    _PLACE_TAG_XY_OFFSET = [ 0.0,  0.0]   # place correction: no offset
     _STACK_OFFSET     = _CUP_HEIGHT - _GRASP_BELOW_TAG  # exact height above place-tag
     _STACK_DROP_EXTRA = 0.05 # extra Z so cup drops naturally onto blue cup
     _GRASP_TILT_Y_DEG = -30   # gripper tilt around Y axis for pick/place (degrees)

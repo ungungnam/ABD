@@ -11,6 +11,7 @@ class ValidationResult:
     confidence: float = 0.0          # 0.0 to 1.0
     method: str = "unknown"          # "geometric", "vlm", "perception_failed", etc.
     details: dict = field(default_factory=dict)
+    needs_reset: bool = False        # True → scene must be reset before next attempt
 
 
 class BaseTaskValidator(ABC):

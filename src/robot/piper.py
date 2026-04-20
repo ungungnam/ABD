@@ -19,6 +19,7 @@ class Piper:
             [0, 0, 1, 0.136],
             [0, 0, 0, 1],
         ])
+        self._gripper_effort = 1000  # default effort (pick_place); stack_cups uses 300
 
     def _lazy_init(self, set_to_zero=True):
         self.piper.ConnectPort()
@@ -107,5 +108,5 @@ class Piper:
     def _control_end_pose(self, end_pose):
         self.piper.MotionCtrl_2(0x01, 0x00, 100, 0x00)
         self.piper.EndPoseCtrl(end_pose[0], end_pose[1], end_pose[2], end_pose[3], end_pose[4], end_pose[5])
-        self.piper.GripperCtrl(end_pose[6], 300, 0x01, 0)
+        self.piper.GripperCtrl(end_pose[6], self._gripper_effort, 0x01, 0)
         time.sleep(0.01)
