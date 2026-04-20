@@ -1,0 +1,64 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "question": "Is the robot in a safe, collision-free position?",
+      "weight": 0.4
+    },
+    {
+      "id": 2,
+      "question": "Is the robot\u2019s gripper or end-effector intact and operational?",
+      "weight": 0.4
+    },
+    {
+      "id": 3,
+      "question": "Is the perception/sensor system providing reliable data?",
+      "weight": 0.3
+    },
+    {
+      "id": 4,
+      "question": "Is the scene free of unexpected hazards or obstacles?",
+      "weight": 0.3
+    },
+    {
+      "id": 5,
+      "question": "Is the drawer handle clearly visible to the robot's sensors?",
+      "weight": 0.3
+    },
+    {
+      "id": 6,
+      "question": "Is the drawer handle within the robot's reachable workspace?",
+      "weight": 0.3
+    },
+    {
+      "id": 7,
+      "question": "Is the drawer handle unobstructed and accessible to the gripper?",
+      "weight": 0.2
+    },
+    {
+      "id": 8,
+      "question": "Is the handle in a state that allows grasping (not broken or missing)?",
+      "weight": 0.2
+    },
+    {
+      "id": 9,
+      "question": "Is there sufficient space in front of the drawer to allow it to open fully?",
+      "weight": 0.2
+    },
+    {
+      "id": 10,
+      "question": "Is the area surrounding the drawer free from obstructions that would block opening?",
+      "weight": 0.2
+    },
+    {
+      "id": 11,
+      "question": "Is the drawer mounted stably and able to move freely along its intended path?",
+      "weight": 0.1
+    },
+    {
+      "id": 12,
+      "question": "Has the drawer not been pulled out so far that it cannot be pushed back in??",
+      "weight": 0.5
+    }
+  ]
+}

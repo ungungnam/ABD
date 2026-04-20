@@ -42,21 +42,16 @@
     },
     {
       "id": 9,
-      "question": "Is the banana in a graspable and manipulable position?",
-      "weight": 0.2
-    },
-    {
-      "id": 10,
       "question": "Is the plate unobstructed and accessible for placing the banana?",
       "weight": 0.2
     },
     {
-      "id": 11,
+      "id": 10,
       "question": "Is there sufficient free space around the plate to place the banana without collision?",
       "weight": 0.2
     },
     {
-      "id": 12,
+      "id": 11,
       "question": "Is the plate on a stable surface suitable for placing the banana?",
       "weight": 0.1
     }

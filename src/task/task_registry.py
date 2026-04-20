@@ -56,17 +56,14 @@ def build_stack_cups_task_from_config(task_cfg) -> TaskSequence:
 
     # forward step 2: stack cup_c on cup_a (cup_a is now on cup_b) — TERMINAL forward step
     stack_c_on_a = TaskDefinition(
-        name=f"stack_{cup_c}_on_{cup_a}",
+        name="stack_cups_forward",
         language_task=f"pick up the {cup_c} cup and stack it on the {cup_a} cup",
         task_type="stack_cups",
         canonical_state={"pick": cup_c, "place": cup_a},
         pick_tag_id=tag_c,
         place_tag_id=tag_a,
         stack_step="forward_2",
-        validation_question=(
-            f"Are all three cups stacked on top of each other: "
-            f"{cup_c} on {cup_a} on {cup_b}?"
-        ),
+        validation_question="Are all the cups stacked on top of each other?",
     )
 
     # reverse step 1: unstack cup_c back to its original position
@@ -76,23 +73,25 @@ def build_stack_cups_task_from_config(task_cfg) -> TaskSequence:
         task_type="stack_cups",
         canonical_state={"pick": cup_c, "place": cup_a},
         pick_tag_id=tag_c,
+        place_tag_id=tag_c,
         place_xy_offset=_UNSTACK,
         stack_step="reverse_1",
     )
 
     # reverse step 2: unstack cup_a back to its original position — TERMINAL reverse step
     unstack_a = TaskDefinition(
-        name=f"unstack_{cup_a}",
+        name="stack_cups_reverse",
         language_task=f"pick up the {cup_a} cup from the {cup_b} cup and place it in its original position",
         task_type="stack_cups",
         canonical_state={"pick": cup_a, "place": cup_b},
         pick_tag_id=tag_a,
+        place_tag_id=tag_a,
         place_xy_offset=_UNSTACK,
         stack_step="reverse_2",
-        validation_question=(
-            f"Are the {cup_c} cup and the {cup_a} cup both on the table and "
-            f"NOT stacked on top of any other cup?"
-        ),
+        validation_question="Are any of the three cups still stacked on top of another cup?",
+        # If purple tag (tag_a) is NOT visible → cup_c still on cup_a → reverse_1 failed
+        # intermediate_check_tag_id=tag_a,
+        # intermediate_check_skip_if_visible=False,
     )
 
     return TaskSequence(

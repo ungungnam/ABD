@@ -62,6 +62,10 @@ def smoothen_trajectory(trajectory: List[np.ndarray], sg_window=9, sg_polyorder=
         Ti[:3, 3] = t_s[i]
         smoothed.append(Ti)
 
+    # Preserve start and end poses exactly — SG boundary effect drifts them
+    smoothed[0] = trajectory[0].copy()
+    smoothed[-1] = trajectory[-1].copy()
+
     return smoothed
 
 

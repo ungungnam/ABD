@@ -47,7 +47,7 @@ class DatasetRecorder:
                              for k, v in frame.items()})
 
     def save_episode(self, task_name: str, success: bool,
-                     record: dict = None) -> Path:
+                     record: dict = None, language_task: str = None) -> Path:
         """Persist buffered frames + episode metadata.
 
         Args:
@@ -95,7 +95,7 @@ class DatasetRecorder:
         # task_name, success come from EpisodeRecord below to avoid duplication.
         meta = {
             "episode_index": ep_idx,
-            "task": self._buffer[0].get("task", ""),   # language task string
+            "task": language_task or self._buffer[0].get("task", ""),   # language task string
             "num_frames": len(self._buffer),
             "saved_at": time.time(),
         }

@@ -1,0 +1,59 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "question": "Is the robot in a safe, collision-free configuration?",
+      "weight": 0.4
+    },
+    {
+      "id": 2,
+      "question": "Is the gripper or end-effector functioning properly?",
+      "weight": 0.4
+    },
+    {
+      "id": 3,
+      "question": "Is the perception system providing reliable observations of the scene?",
+      "weight": 0.3
+    },
+    {
+      "id": 4,
+      "question": "Is the drawer and its surroundings free of any hazards or obstructions that could cause harm?",
+      "weight": 0.3
+    },
+    {
+      "id": 5,
+      "question": "Is the drawer handle clearly visible?",
+      "weight": 0.3
+    },
+    {
+      "id": 6,
+      "question": "Is the drawer handle within the robot's reachable workspace?",
+      "weight": 0.3
+    },
+    {
+      "id": 7,
+      "question": "Is the drawer handle in a graspable orientation and unobstructed for gripping?",
+      "weight": 0.3
+    },
+    {
+      "id": 8,
+      "question": "Is the area in front of the drawer free of objects that obstruct drawer closing?",
+      "weight": 0.2
+    },
+    {
+      "id": 9,
+      "question": "Is there sufficient clearance for the drawer to close fully?",
+      "weight": 0.2
+    },
+    {
+      "id": 10,
+      "question": "Is the drawer guide and track in good condition and free of major mechanical blockage?",
+      "weight": 0.2
+    },
+    {
+      "id": 11,
+      "question": "Is the drawer and handle stable enough to withstand pushing interaction?",
+      "weight": 0.1
+    }
+  ]
+}

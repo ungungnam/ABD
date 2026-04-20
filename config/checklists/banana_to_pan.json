@@ -37,21 +37,16 @@
     },
     {
       "id": 8,
-      "question": "Is the banana in a graspable state for the robot?",
-      "weight": 0.2
-    },
-    {
-      "id": 9,
       "question": "Is the interior of the pan accessible to the robot without obstruction?",
       "weight": 0.2
     },
     {
-      "id": 10,
+      "id": 9,
       "question": "Is there sufficient free space above and around the pan to place the banana?",
       "weight": 0.2
     },
     {
-      "id": 11,
+      "id": 10,
       "question": "Is the pan resting stably and unlikely to tip during banana placement?",
       "weight": 0.1
     }

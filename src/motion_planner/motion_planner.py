@@ -46,7 +46,8 @@ class MotionPlanner():
     _TAG_Z            = _TABLE_Z + _CUP_HEIGHT  # = 0.027 m — fixed tag height
     _GRASP_BELOW_TAG  = 0.015   # gripper TIP offset below tag
     _GRASP_BELOW_TAG_unstack  = 0.020 
-    _PICK_TAG_XY_OFFSET = [-0.021, 0.0]  # pick tag physical offset from cup center (X: -2.1 cm)
+    _PICK_TAG_XY_OFFSET  = [ 0.0,  0.01]  # pick correction: +1 cm in Y (robot-left)
+    _PLACE_TAG_XY_OFFSET = [-0.01, 0.01]  # place correction: -1 cm in X (toward robot), +1 cm in Y
     _STACK_OFFSET     = _CUP_HEIGHT - _GRASP_BELOW_TAG  # exact height above place-tag
     _STACK_DROP_EXTRA = 0.05 # extra Z so cup drops naturally onto blue cup
     _GRASP_TILT_Y_DEG = -30   # gripper tilt around Y axis for pick/place (degrees)
@@ -91,13 +92,15 @@ class MotionPlanner():
         return partial_trajectory, partial_events, key_poses
 
     def plan_pick_place(self, pick_perception, place_perception, vlm_action=None):
-        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.12)
-        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.12)
+        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.05)
+        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.05)
         if pick_grasp_pose and place_grasp_pose:
             trajectory, events, key_poses = self.generate_trajectory(
                 vlm_action=vlm_action,
                 pick_grasp_pose=pick_grasp_pose,
                 place_grasp_pose=place_grasp_pose,
+                post_lift=False,
+                descent_max_step=0.015,
             )
         else:
             trajectory, events, key_poses = self.generate_trajectory(vlm_action=vlm_action)
@@ -111,10 +114,13 @@ class MotionPlanner():
                 vlm_action=vlm_action,
                 pick_grasp_pose=pick_grasp_pose,
                 place_grasp_pose=place_grasp_pose,
+                descent_max_step=0.004,
+                lift_max_step=0.008,
             )
+            return self._finalize(trajectory, events, key_poses)
         else:
-            trajectory, events, key_poses = self.generate_trajectory(vlm_action=vlm_action)
-        return self._finalize(trajectory, events, key_poses)
+            # AprilTag not detected — signal failure cleanly (no VLM fallback)
+            return None, [], []
 
     def plan_open_drawer(self, pick_tag_id, stack_step):
         action = "open" if stack_step == "forward" else "close"
@@ -400,7 +406,10 @@ class MotionPlanner():
             step: float = 0.06,
             close_trans_thresh: float = 0.03,
             close_rot_thresh_deg: float = 10.0,
-            ext_len=3
+            ext_len=3,
+            post_lift: bool = True,
+            descent_max_step: float = 0.015,
+            lift_max_step: float = 0.05,
     ) -> Tuple[List[np.ndarray], List[Dict[str, Any]]]:
         """
         Return:
@@ -408,6 +417,7 @@ class MotionPlanner():
           events: List of event dicts, e.g. {"at": idx, "cmd": "CLOSE"}
                  - 'at' is the waypoint index where you *intend* to trigger.
                  - execution code should still gate by pose error.
+          key_poses: list of key SE(3) poses (empty when post_lift=False)
         """
         def _is_T_close(T1: np.ndarray, T2: np.ndarray) -> bool:
             d_trans = np.linalg.norm(T1[:3, 3] - T2[:3, 3])
@@ -423,8 +433,6 @@ class MotionPlanner():
         events: List[Dict[str, Any]] = []
         key_poses: List[np.ndarray] = []
 
-        # if pick grasp and place grasp is none
-        # then make traj of T_cur to T_vlm
         # ---- Case 1: no pick & no place -> VLM-only ----
         if pick_grasp_pose is None and place_grasp_pose is None:
             T_vlm = self._make_vlm_subgoal(vlm_action, step=step, keep_rotation=True)
@@ -432,8 +440,6 @@ class MotionPlanner():
             traj_T = self._prune_duplicates(traj_T)
             return traj_T, [], []
 
-        # if pick grasp and place grasp is not none
-        # then make traj of T_cur to T_vlm to T_pick to T_place
         # ---- Case 2: require BOTH pick and place ----
         else:
             pre_pick = pick_grasp_pose["pre_T_wg"]
@@ -441,16 +447,12 @@ class MotionPlanner():
             pre_place = place_grasp_pose["pre_T_wg"]
             T_place = place_grasp_pose["T_wg"]
 
-            # post_pick: pick 위치에서 z축 +15cm 리프트
-            post_pick = T_pick.copy()
-            post_pick[:3, 3] = T_pick[:3, 3] + np.array([0.0, 0.0, 0.15])
-
-            # post_place: place 위치에서 z축 +15cm 리프트
-            post_place = T_place.copy()
-            post_place[:3, 3] = T_place[:3, 3] + np.array([0.0, 0.0, 0.15])
-
-            # key poses for IK fallback: pre_pick, pick, post_pick, pre_place, place, post_place
-            key_poses = [pre_pick, T_pick, post_pick, pre_place, T_place, post_place]
+            if post_lift:
+                post_pick = T_pick.copy()
+                post_pick[:3, 3] = T_pick[:3, 3] + np.array([0.0, 0.0, 0.15])
+                post_place = T_place.copy()
+                post_place[:3, 3] = T_place[:3, 3] + np.array([0.0, 0.0, 0.15])
+                key_poses = [pre_pick, T_pick, post_pick, pre_place, T_place, post_place]
 
             # 1) cur -> vlm(pick)
             if vlm_action is not None:
@@ -460,50 +462,44 @@ class MotionPlanner():
             _append(traj_T, self._interpolate_poses_linear(T_cur, T_vlm))
             traj_T = self._prune_duplicates(traj_T)
 
-            # 2) -> pre_pick (hover 5 cm above) -> pick (slow vertical descent)
+            # 2) -> pre_pick -> pick
             if not _is_T_close(T_vlm, pre_pick):
                 seg = self._interpolate_poses_linear(T_vlm, pre_pick)
-                seg = self._prune_duplicates(seg)
-                _append(traj_T, seg)
+                _append(traj_T, self._prune_duplicates(seg))
 
             T_at_pre_pick = traj_T[-1] if traj_T else T_vlm
             if not _is_T_close(T_at_pre_pick, T_pick):
-                seg = self._interpolate_poses_linear(T_at_pre_pick, T_pick, max_step=0.004)
-                seg = self._prune_duplicates(seg)
-                _append(traj_T, seg)
+                seg = self._interpolate_poses_linear(T_at_pre_pick, T_pick, max_step=descent_max_step)
+                _append(traj_T, self._prune_duplicates(seg))
 
-            # 3) extend near pick + CLOSE at extend end (or at pick if ext_len==0)
+            # 3) dwell + CLOSE
             _append(traj_T, [traj_T[-1]]*ext_len)
             events.append({"at": len(traj_T) - 1, "cmd": pick_event})
 
-            # 3b) post_pick: pick 위치에서 z축 +15cm 수직 리프트
-            seg = self._interpolate_poses_linear(traj_T[-1], post_pick, max_step=0.008)
-            seg = self._prune_duplicates(seg)
-            _append(traj_T, seg)
+            if post_lift:
+                seg = self._interpolate_poses_linear(traj_T[-1], post_pick, max_step=lift_max_step)
+                _append(traj_T, self._prune_duplicates(seg))
 
             _append(traj_T, self._interpolate_poses_linear(traj_T[-1], T_cur))
 
-            # 4) -> pre_place (hover 3 cm above) -> place (slow vertical descent)
+            # 4) -> pre_place -> place
             T_start = traj_T[-1]
             if not _is_T_close(T_start, pre_place):
                 seg = self._interpolate_poses_linear(T_start, pre_place)
-                seg = self._prune_duplicates(seg)
-                _append(traj_T, seg)
+                _append(traj_T, self._prune_duplicates(seg))
 
             T_at_pre_place = traj_T[-1] if traj_T else T_start
             if not _is_T_close(T_at_pre_place, T_place):
-                seg = self._interpolate_poses_linear(T_at_pre_place, T_place, max_step=0.008)
-                seg = self._prune_duplicates(seg)
-                _append(traj_T, seg)
+                seg = self._interpolate_poses_linear(T_at_pre_place, T_place, max_step=descent_max_step)
+                _append(traj_T, self._prune_duplicates(seg))
 
-            # 5) extend near place + OPEN at extend end
+            # 5) dwell + OPEN
             _append(traj_T, [traj_T[-1]]*ext_len)
             events.append({"at": len(traj_T) - 1, "cmd": place_event})
 
-            # 5b) post_place: place 위치에서 z축 +15cm 수직 리프트
-            seg = self._interpolate_poses_linear(traj_T[-1], post_place, max_step=0.008)
-            seg = self._prune_duplicates(seg)
-            _append(traj_T, seg)
+            if post_lift:
+                seg = self._interpolate_poses_linear(traj_T[-1], post_place, max_step=lift_max_step)
+                _append(traj_T, self._prune_duplicates(seg))
 
             _append(traj_T, self._interpolate_poses_linear(traj_T[-1], T_cur))
 
@@ -622,11 +618,12 @@ class MotionPlanner():
         return {"T_wg": T_wg, "pre_T_wg": pre_T_wg}
 
     # Per-step pose offsets: (pick_hover, place_z, place_hover)
+    # reverse place_z = -_GRASP_BELOW_TAG: gripper releases cup at same height as table-level pick
     _STACK_STEP_OFFSETS = {
         "forward_1": (0.07, 0.015, 0.10),
         "forward_2": (0.07, 0.015, 0.11),
-        "reverse_1": (0.05, 0.015, 0.10),
-        "reverse_2": (0.05, 0.015, 0.10),
+        "reverse_1": (0.05, -0.015, 0.10),
+        "reverse_2": (0.05, -0.015, 0.10),
     }
 
     def _get_stack_grasp_poses(self, pick_tag_id, place_tag_id, place_xy_offset,
@@ -684,20 +681,23 @@ class MotionPlanner():
             return None, None
 
         pick_pose = self._make_grasp_pose_from_tag_world(
-            T_pick_wt, z_offset=-self._GRASP_BELOW_TAG, hover_offset=pick_hover)
+            T_pick_wt, z_offset=-self._GRASP_BELOW_TAG, hover_offset=pick_hover,
+            xy_offset=self._PICK_TAG_XY_OFFSET)
 
         if place_xy_offset:
             # Unstack: use cached position (defaults pre-populated in __init__,
             # overwritten by forward steps when tag is detected).
             cached_T = self._tag_position_cache.get(pick_tag_id)
             place_pose = self._make_grasp_pose_from_tag_world(
-                cached_T, z_offset=place_z, hover_offset=place_hover)
+                cached_T, z_offset=place_z, hover_offset=place_hover,
+                xy_offset=self._PLACE_TAG_XY_OFFSET)
         else:
             # Stack: place on top of the place tag's current position.
             if T_place_wt is None:
                 return None, None
             place_pose = self._make_grasp_pose_from_tag_world(
-                T_place_wt, z_offset=place_z, hover_offset=place_hover)
+                T_place_wt, z_offset=place_z, hover_offset=place_hover,
+                xy_offset=self._PLACE_TAG_XY_OFFSET)
 
         return pick_pose, place_pose
 
@@ -720,7 +720,7 @@ class MotionPlanner():
             if T_wt is not None:
                 break
         if T_wt is None:
-            T_wt = detect_tag_world_pose_stereo(self.cameras, tag_id)
+            T_wt = detect_tag_world_pose_stereo(self.cameras, tag_id, tag_size=0.06)
         if T_wt is None:
             log.warning(f"[MotionPlanner] AprilTag {tag_id} not found for drawer task.")
             return None, None
@@ -836,8 +836,9 @@ class MotionPlanner():
             obb = fit_obb_pca(object_points)
             grasp_poses = generate_grasps_from_obb(obb, rotation=self.current_pose()[:3, :3])
             best_grasp_pose = self.sample_best_grasp(grasp_poses)
-            forced_R = self._grasp_R()
+            forced_R = np.array([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]])
             best_grasp_pose['T_wg'][:3, :3] = forced_R
+            best_grasp_pose['T_wg'][2, 3] -= 0.01   # pick 1 cm deeper in Z
             best_grasp_pose['pre_T_wg'][:3, :3] = forced_R
             best_grasp_pose['pre_T_wg'][:3, 3] = (
                 best_grasp_pose['T_wg'][:3, 3] + np.array([0.0, 0.0, hover_offset])

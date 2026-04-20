@@ -84,18 +84,34 @@ class VLMChecklistPolicy(BaseResetPolicy):
     def _checklist_path(self, task_name: str) -> Path:
         return self.checklist_dir / f"{task_name}.json"
 
-    def _load_or_generate(self, task) -> dict:
-        if task.name in self._checklists:
-            return self._checklists[task.name]
+    def _canonical_checklist_name(self, task) -> str:
+        """Return the canonical checklist file stem for this task.
 
-        path = self._checklist_path(task.name)
+        stack_cups steps share two checklists regardless of their individual
+        task.name (which varies by cup colour):
+          forward steps (stack_step starts with "forward") → stack_cups_forward
+          reverse steps (stack_step starts with "reverse") → stack_cups_reverse
+        All other tasks use task.name directly.
+        """
+        if task.task_type == "stack_cups":
+            is_forward = task.stack_step.startswith("forward")
+            return "stack_cups_forward" if is_forward else "stack_cups_reverse"
+        return task.name
+
+    def _load_or_generate(self, task) -> dict:
+        name = self._canonical_checklist_name(task)
+
+        if name in self._checklists:
+            return self._checklists[name]
+
+        path = self._checklist_path(name)
         if path.exists():
             with open(path) as f:
                 checklist = json.load(f)
             log.info(f"[VLMChecklistPolicy] Loaded checklist from {path}")
         else:
             log.info(
-                f"[VLMChecklistPolicy] No checklist for '{task.name}' at {path}; "
+                f"[VLMChecklistPolicy] No checklist for '{name}' at {path}; "
                 f"generating via VLM."
             )
             checklist = self._generate_checklist(task)
@@ -103,8 +119,8 @@ class VLMChecklistPolicy(BaseResetPolicy):
                 json.dump(checklist, f, indent=2)
             log.info(f"[VLMChecklistPolicy] Wrote new checklist to {path}")
 
-        self._validate_checklist_schema(checklist, task.name)
-        self._checklists[task.name] = checklist
+        self._validate_checklist_schema(checklist, name)
+        self._checklists[name] = checklist
         return checklist
 
     def _generate_checklist(self, task) -> dict:

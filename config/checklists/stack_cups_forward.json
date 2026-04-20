@@ -1,0 +1,59 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "question": "Is the robot arm in a collision-free and safe position?",
+      "weight": 0.4
+    },
+    {
+      "id": 2,
+      "question": "Is the robot's gripper undamaged and able to open and close?",
+      "weight": 0.4
+    },
+    {
+      "id": 3,
+      "question": "Are sensors providing reliable and consistent data?",
+      "weight": 0.3
+    },
+    {
+      "id": 4,
+      "question": "Are there no hazardous objects or spilled materials in the workspace?",
+      "weight": 0.3
+    },
+    {
+      "id": 5,
+      "question": "Are none of the cups knocked over or lying on their side?",
+      "weight": 0.3
+    },
+    {
+      "id": 6,
+      "question": "Are all the cups located within the robot's reachable workspace?",
+      "weight": 0.3
+    },
+    {
+      "id": 7,
+      "question": "Is there a clear, unobstructed path to all the cups?",
+      "weight": 0.2
+    },
+    {
+      "id": 8,
+      "question": "Are all the cups on stable surfaces suitable for stacking?",
+      "weight": 0.1
+    },
+    {
+      "id": 9,
+      "question": "Are all three cups fully stacked together?",
+      "weight": 0.3
+    },
+    {
+      "id": 10,
+      "question": "Are all three cups completely separate from each other?",
+      "weight": 0.3
+    },
+    {
+      "id": 11,
+      "question": "Are none of the cups knocked over or lying on their side?",
+      "weight": 0.4
+    }
+  ]
+}
