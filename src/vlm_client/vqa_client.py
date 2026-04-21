@@ -48,11 +48,19 @@ class VQAClient:
             VLMRequest(prompt=prompt, images=observation, task_kind=task_kind)
         )
 
-    def ask_yes_no(self, observation: dict, question: str) -> bool:
-        """Ask a yes/no question and parse the boolean answer."""
+    def ask_yes_no(self, observation: dict, question: str, preamble: str = "") -> bool:
+        """Ask a yes/no question and parse the boolean answer.
+
+        Args:
+            preamble: Optional context prepended before the question
+                      (e.g. multi-view instructions for stack_cups).
+        """
         if not question.strip().endswith("?"):
             question = question.strip() + "?"
-        full_question = f"{question} Answer with only 'yes' or 'no'."
+        if preamble:
+            full_question = f"{preamble} {question} Answer with only 'yes' or 'no'."
+        else:
+            full_question = f"{question} Answer with only 'yes' or 'no'."
         response = self.backend.generate(
             VLMRequest(
                 prompt=full_question,

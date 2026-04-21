@@ -299,6 +299,8 @@ class CollectionRunner:
                             episode_duration=reset_confirm_time - episode_start_time,
                             reset_prompt_to_confirm=reset_confirm_time - reset_decided_at,
                         )
+                        if not self.is_dummy and task.task_type == "stack_cups":
+                            record.ground_truth_reset = self.human_interface.request_ground_truth_label()
                         self.metrics.log_episode(record)
                         self.metrics.log_intervention(InterventionRecord(
                             timestamp=reset_decided_at,
@@ -348,14 +350,21 @@ class CollectionRunner:
                     checklist_eval = None
                     decision = "next"
                 else:
-                    validation = self.validator.validate(task, exec_result.final_obs, self.env)
+                    # validation 전 init pose로 복귀 후 observation 재취득
+                    if not self.is_dummy:
+                        self.env.go_to_init_pose()
+                        val_obs = self.env.get_observation()
+                    else:
+                        val_obs = exec_result.final_obs
+
+                    validation = self.validator.validate(task, val_obs, self.env)
                     success = validation.success
                     checklist_reset = self.policy.needs_reset(
                         validation=validation,
                         fail_count=fail_count,
                         episode_idx=ep,
                         task=task,
-                        observation=exec_result.final_obs,
+                        observation=val_obs,
                     )
                     checklist_eval = getattr(self.policy, "last_eval", None)
                     # Checklist is authoritative when it runs; fall back to
@@ -474,8 +483,11 @@ class CollectionRunner:
                             )
                         break
 
-                # Ground truth label only at terminal steps (all cups stacked / all cups unstacked)
-                if not self.is_dummy and was_terminal_step:
+                # Ground truth label: terminal steps + stack_cups reset (perception error 포함)
+                _needs_gt_label = was_terminal_step or (
+                    task.task_type == "stack_cups" and decision == "reset"
+                )
+                if not self.is_dummy and _needs_gt_label:
                     record.ground_truth_reset = self.human_interface.request_ground_truth_label()
 
                 # Save episode data.

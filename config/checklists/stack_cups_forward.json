@@ -37,17 +37,17 @@
     },
     {
       "id": 8,
-      "question": "Are all the cups on stable surfaces suitable for stacking?",
+      "question": "Are all three cups (purple, pink and blue) on stable surfaces suitable for stacking?",
       "weight": 0.1
     },
     {
       "id": 9,
-      "question": "Are all three cups fully stacked together?",
+      "question": "Are all three cups (purple, pink and blue) fully stacked together?",
       "weight": 0.3
     },
     {
       "id": 10,
-      "question": "Are all three cups completely separate from each other?",
+      "question": "Are all three cups (purple, pink and blue) completely separate from each other?",
       "weight": 0.3
     },
     {

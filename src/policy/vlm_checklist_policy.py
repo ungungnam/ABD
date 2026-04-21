@@ -173,11 +173,7 @@ class VLMChecklistPolicy(BaseResetPolicy):
             task_description=task.language_task,
             items_block=items_block,
         )
-        obs = (
-            {k: v for k, v in observation.items() if "wrist" not in k}
-            if task.task_type == "stack_cups" else observation
-        )
-        raw = self.vqa_client.ask_text(obs, prompt)
+        raw = self.vqa_client.ask_text(observation, prompt)
 
         answers = self._parse_answers(raw, items)
 
