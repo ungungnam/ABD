@@ -23,6 +23,12 @@ from policy.checklist_prompts import META_PROMPT, EVAL_PROMPT
 from validator.base_validator import ValidationResult
 from vlm_client.vqa_client import VQAClient
 
+_CHECKLIST_PREAMBLE = (
+    "The provided images are different views of the same scene at the same time. "
+    "Use all images together to evaluate the checklist items. "
+    "If one view is ambiguous because of occlusion or perspective, rely more on the clearer external views."
+)
+
 log = logging.getLogger(__name__)
 
 
@@ -169,7 +175,7 @@ class VLMChecklistPolicy(BaseResetPolicy):
         items_block = "\n".join(
             f"{item['id']}. {item['question']}" for item in items
         )
-        prompt = EVAL_PROMPT.format(
+        prompt = _CHECKLIST_PREAMBLE + "\n\n" + EVAL_PROMPT.format(
             task_description=task.language_task,
             items_block=items_block,
         )
