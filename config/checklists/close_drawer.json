@@ -54,6 +54,11 @@
       "id": 11,
       "question": "Is the drawer and handle stable enough to withstand pushing interaction?",
       "weight": 0.1
+    },
+    {
+      "id": 12,
+      "question": "Is the front of the drawer facing the robot, rather than turned away at an angle?",
+      "weight": 0.5
     }
   ]
 }

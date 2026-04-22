@@ -65,11 +65,13 @@ class VLMValidator(BaseTaskValidator):
 
         if task.task_type == "open_drawer":
             preamble = _PREAMBLE_OPEN_DRAWER
+            obs = {k: v for k, v in post_obs.items() if "front" not in k}
         else:
             preamble = _PREAMBLE_PICK_PLACE
+            obs = post_obs
 
         log.info(f"[VLMValidator] task={task.name} | query: {question}")
-        raw = self.vqa_client.ask_yes_no(post_obs, question, preamble=preamble)
+        raw = self.vqa_client.ask_yes_no(obs, question, preamble=preamble)
         log.info(f"[VLMValidator] raw={raw} → success={raw}")
 
         return ValidationResult(

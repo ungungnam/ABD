@@ -57,7 +57,12 @@
     },
     {
       "id": 12,
-      "question": "Has the drawer not been pulled out so far that it cannot be pushed back in??",
+      "question": "Has the drawer not been pulled out so far that it cannot be pushed back in?",
+      "weight": 0.5
+    },
+    {
+      "id": 13,
+      "question": "Is the front of the drawer facing the robot, rather than turned away at an angle?",
       "weight": 0.5
     }
   ]

@@ -326,6 +326,9 @@ class CollectionRunner:
                     if task.task_type == "stack_cups":
                         gripper_close = 36000
                         gripper_effort = 300
+                    elif task.task_type == "open_drawer":
+                        gripper_close = 0
+                        gripper_effort = 1000
                     else:
                         gripper_close = 0
                         gripper_effort = 300
