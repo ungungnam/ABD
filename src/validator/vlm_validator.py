@@ -74,6 +74,9 @@ class VLMValidator(BaseTaskValidator):
         raw = self.vqa_client.ask_yes_no(obs, question, preamble=preamble)
         log.info(f"[VLMValidator] raw={raw} → success={raw}")
 
+        if not raw:
+            print('success failure')
+
         return ValidationResult(
             success=raw,
             confidence=0.6,

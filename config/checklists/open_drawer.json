@@ -62,8 +62,24 @@
     },
     {
       "id": 13,
-      "question": "Is the front of the drawer facing the robot, rather than turned away at an angle?",
+      "question": "Using the wrist camera as the reference for the robot-facing direction, is the drawer perfectly front-facing, with no left or right rotation at all?",
       "weight": 0.5
+    },
+    {
+      "id": 14,
+      "question": "Based on the object detection status provided, is the drawer's AprilTag successfully detected by the robot's perception system?",
+      "weight": 0.5
+    },
+    {
+      "id": 15,
+      "question": "Based on the object detection status provided, is the drawer rotation angle less than 15 degrees from front-facing?",
+      "weight": 0.5
+    },
+    {
+      "id": 16,
+      "question": "Is the drawer currently open (pulled out from its fully closed position)?",
+      "weight": 0.3,
+      "success_item": true
     }
   ]
 }

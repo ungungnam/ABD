@@ -11,7 +11,8 @@ class PeriodicPolicy(BaseResetPolicy):
         self._episodes_since_reset = 0
 
     def needs_reset(self, validation: ValidationResult, fail_count: int,
-                    episode_idx: int, task=None, observation=None) -> bool:
+                    episode_idx: int, task=None, observation=None,
+                    detection_info: dict = None) -> bool:
         self._episodes_since_reset += 1
         if self._episodes_since_reset >= self.period:
             self._episodes_since_reset = 0

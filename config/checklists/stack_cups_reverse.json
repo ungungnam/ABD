@@ -42,18 +42,29 @@
     },
     {
       "id": 9,
-      "question": "Are all three cups fully stacked together?",
-      "weight": 0.3
+      "question": "Is the purple cup stacked on top of the blue cup?",
+      "weight": -0.5,
+      "success_item": true,
+      "success_answer": "no",
+      "reset_group": 1
     },
     {
       "id": 10,
-      "question": "Are all three cups completely separate from each other?",
-      "weight": 0.3
+      "question": "Is the pink cup stacked on top of the purple cup?",
+      "weight": -0.5,
+      "success_item": true,
+      "success_answer": "no",
+      "reset_group": 1
     },
     {
       "id": 11,
       "question": "Are none of the cups knocked over or lying on their side?",
       "weight": 0.4
+    },
+    {
+      "id": 12,
+      "question": "Based on the object detection status provided, is the pick cup successfully detected by the robot's perception system?",
+      "weight": 0.5
     }
   ]
 }

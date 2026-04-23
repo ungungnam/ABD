@@ -252,19 +252,23 @@ class CollectionRunner:
                 gen_elapsed = gen_result.metadata.get("elapsed_time", 0.0)
 
                 if gen_result.trajectory is None:
-                    # stack_cups: if tag detection fails at steps AFTER forward_1
-                    # (forward_2, reverse_1, reverse_2), the scene is likely in a
-                    # partial state from a prior step failure.  Route to VLM validation
-                    # instead of an immediate human reset.
-                    _route_to_vlm = (
-                        task.task_type == "stack_cups"
-                        and task.stack_step != "forward_1"
-                        and not self.is_dummy
+                    _reason = gen_result.metadata.get("reason", "unknown")
+                    _is_perception_failure = _reason in (
+                        "pick_perception_failed",
+                        "place_perception_failed",
+                        "apriltag_not_found",
                     )
+                    # stack_cups intermediate steps (forward_1, reverse_1): always route
+                    # generation failures to checklist instead of immediate human reset.
+                    _is_intermediate_stack = (
+                        task.task_type == "stack_cups"
+                        and not self.task_scheduler.is_terminal_step
+                    )
+                    _route_to_vlm = not self.is_dummy and (_is_perception_failure or _is_intermediate_stack)
                     if _route_to_vlm:
                         log.info(
-                            f"[StackCups] Tag not found at step {task.stack_step} — "
-                            f"routing to VLM validation (prior step may have partially failed)"
+                            f"[GenFailure] reason={_reason} at {task.name} — "
+                            f"routing to checklist"
                         )
                         skip_execution = True
                         exec_result = ExecutionResult(
@@ -360,19 +364,55 @@ class CollectionRunner:
                     else:
                         val_obs = exec_result.final_obs
 
-                    validation = self.validator.validate(task, val_obs, self.env)
-                    success = validation.success
-                    checklist_reset = self.policy.needs_reset(
-                        validation=validation,
-                        fail_count=fail_count,
-                        episode_idx=ep,
-                        task=task,
-                        observation=val_obs,
-                    )
-                    checklist_eval = getattr(self.policy, "last_eval", None)
-                    # Checklist is authoritative when it runs; fall back to
-                    # validation.needs_reset only when checklist is unavailable.
-                    reset_needed = checklist_reset if checklist_eval is not None else validation.needs_reset
+                    detection_info = self._build_detection_info(task, gen_result)
+
+                    # VLMChecklistPolicy: checklist handles both success detection and
+                    # reset decision via success_item-flagged questions.
+                    # Other policies: fall back to VLMValidator for success.
+                    if hasattr(self.policy, "last_success") and not self.is_dummy:
+                        checklist_reset = self.policy.needs_reset(
+                            validation=None,
+                            fail_count=fail_count,
+                            episode_idx=ep,
+                            task=task,
+                            observation=val_obs,
+                            detection_info=detection_info,
+                        )
+                        checklist_eval = getattr(self.policy, "last_eval", None)
+                        policy_success = self.policy.last_success
+                        # If checklist has no success_item defined, fall back to validator
+                        if policy_success is not None:
+                            success = policy_success
+                            validation = ValidationResult(
+                                success=success,
+                                confidence=0.8,
+                                method="checklist",
+                                details={"score": checklist_eval.get("score", 0.0) if checklist_eval else 0.0},
+                                needs_reset=False,
+                            )
+                        else:
+                            validation = self.validator.validate(task, val_obs, self.env)
+                            success = validation.success
+                        reset_needed = checklist_reset if checklist_eval is not None else False
+                    else:
+                        # Fallback: separate VLMValidator + policy
+                        if not self.is_dummy:
+                            validation = self.validator.validate(task, val_obs, self.env)
+                        else:
+                            validation = ValidationResult(
+                                success=True, confidence=0.5, method="dummy", details={}
+                            )
+                        success = validation.success
+                        checklist_reset = self.policy.needs_reset(
+                            validation=validation,
+                            fail_count=fail_count,
+                            episode_idx=ep,
+                            task=task,
+                            observation=val_obs,
+                            detection_info=detection_info,
+                        )
+                        checklist_eval = getattr(self.policy, "last_eval", None)
+                        reset_needed = checklist_reset if checklist_eval is not None else validation.needs_reset
 
                     if success and not reset_needed:
                         decision = "next"
@@ -646,6 +686,64 @@ class CollectionRunner:
         except Exception:
             n = 1
         return f"{today}_{n}"
+
+    @staticmethod
+    def _build_detection_info(task, gen_result) -> dict:
+        """Build a {object_name: 'detected'|'not detected'} dict from gen metadata.
+
+        Used to inform the checklist evaluator which objects were visible
+        during trajectory generation.
+        """
+        m = gen_result.metadata
+        reason = m.get("reason", "")
+
+        if task.task_type == "stack_cups":
+            is_reverse = task.stack_step.startswith("reverse")
+            cs = task.canonical_state or {}
+            pick_name = f"{cs['pick']} cup (pick)" if cs.get("pick") else "pick cup (pick)"
+            place_name = f"{cs['place']} cup (place)" if cs.get("place") else "place cup (place)"
+            # Use per-tag detection flags when available (stored by _generate_stack_cups).
+            # Fall back to reason-based heuristic for backward compatibility.
+            if "pick_detected" in m:
+                pick_det = m["pick_detected"]
+            else:
+                pick_det = (reason != "apriltag_not_found")
+            info = {pick_name: "detected" if pick_det else "not detected"}
+            # Reverse steps use cached place position — no live tag detection, omit.
+            if not is_reverse and task.place_tag_id is not None:
+                if "place_detected" in m and m["place_detected"] is not None:
+                    place_det = m["place_detected"]
+                else:
+                    place_det = (reason != "apriltag_not_found")
+                info[place_name] = "detected" if place_det else "not detected"
+            return info
+
+        if task.task_type == "open_drawer":
+            tag_found = (reason != "apriltag_not_found")
+            info = {"drawer": "detected" if tag_found else "not detected"}
+            if tag_found:
+                rot = m.get("drawer_rotation_deg")
+                if rot is not None:
+                    if abs(rot) < 0.5:
+                        info["drawer rotation"] = "0.0 degrees (front-facing)"
+                    else:
+                        direction = "left" if rot > 0 else "right"
+                        info["drawer rotation"] = f"{abs(rot):.1f} degrees {direction}"
+            return info
+
+        # pick_place: use identified object names from VLM planner
+        pick_obj = m.get("pick_object") or (task.canonical_state or {}).get("object")
+        place_obj = m.get("place_object") or (task.canonical_state or {}).get("target")
+        if not pick_obj and not place_obj:
+            return {}
+
+        info = {}
+        if pick_obj:
+            info[f"{pick_obj} (pick)"] = "detected" if m.get("pick_detected", True) else "not detected"
+        if place_obj:
+            place_det = m.get("place_detected")
+            info[f"{place_obj} (place)"] = "detected" if (place_det is not False) else "not detected"
+        return info
 
     def _handle_reset(self, task):
         """Request human reset and recalibrate.

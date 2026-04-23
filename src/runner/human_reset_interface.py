@@ -5,6 +5,7 @@ then waits for confirmation before continuing.
 Uses the same tty approach as PaPA's DatasetRecorder.
 """
 
+import logging
 import sys
 import time
 import select
@@ -13,6 +14,8 @@ import tty
 from typing import Tuple
 
 from task.task_family import TaskDefinition
+
+log = logging.getLogger(__name__)
 
 
 class HumanResetInterface:
@@ -49,6 +52,7 @@ class HumanResetInterface:
                 ch = sys.stdin.read(1)
                 if ch in ("1", "2", "3", "4"):
                     print()
+                    log.info(f"[GroundTruth] Input key: {ch}")
                     return int(ch)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)

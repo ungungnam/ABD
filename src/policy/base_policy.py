@@ -17,6 +17,7 @@ class BaseResetPolicy(ABC):
 
     @abstractmethod
     def needs_reset(self, validation: ValidationResult, fail_count: int,
-                    episode_idx: int, task=None, observation=None) -> bool:
+                    episode_idx: int, task=None, observation=None,
+                    detection_info: dict = None) -> bool:
         """Return True if the environment needs a human reset."""
         ...

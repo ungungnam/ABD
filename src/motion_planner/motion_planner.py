@@ -21,6 +21,8 @@ class MotionPlanner():
         #   tag 6 (pink):   [x, y] = [0.3476801,  0.15095109]
         #   tag 5 (purple): [x, y] = [0.3476801, -0.05095109]
         self._tag_position_cache: dict = self._make_default_tag_cache()
+        # Last detected drawer tag pose (set in _get_drawer_grasp_poses)
+        self.last_drawer_tag_pose: Optional[np.ndarray] = None
 
     @classmethod
     def _make_default_tag_cache(cls) -> dict:
@@ -107,8 +109,9 @@ class MotionPlanner():
         return self._finalize(trajectory, events, key_poses)
 
     def plan_stack_cups(self, pick_tag_id, place_tag_id, place_xy_offset, stack_step, vlm_action=None):
-        pick_grasp_pose, place_grasp_pose = self._get_stack_grasp_poses(
-            pick_tag_id, place_tag_id, place_xy_offset, stack_step=stack_step)
+        pick_grasp_pose, place_grasp_pose, pick_detected, place_detected = \
+            self._get_stack_grasp_poses(
+                pick_tag_id, place_tag_id, place_xy_offset, stack_step=stack_step)
         if pick_grasp_pose and place_grasp_pose:
             trajectory, events, key_poses = self.generate_trajectory(
                 vlm_action=vlm_action,
@@ -117,10 +120,10 @@ class MotionPlanner():
                 descent_max_step=0.004,
                 lift_max_step=0.008,
             )
-            return self._finalize(trajectory, events, key_poses)
+            return self._finalize(trajectory, events, key_poses), pick_detected, place_detected
         else:
             # AprilTag not detected — signal failure cleanly (no VLM fallback)
-            return None, [], []
+            return (None, [], []), pick_detected, place_detected
 
     def plan_open_drawer(self, pick_tag_id, stack_step):
         action = "open" if stack_step == "forward" else "close"
@@ -626,20 +629,38 @@ class MotionPlanner():
         "reverse_2": (0.05, -0.015, 0.10),
     }
 
+    @staticmethod
+    def _average_tag_poses(transforms: List[np.ndarray]) -> np.ndarray:
+        """Return a tag world transform whose translation is the equal-weight average
+        of all input transforms.  Rotation is taken from the first entry (it is
+        overridden by _grasp_R() / _drawer_R() downstream anyway).
+        """
+        avg_t = np.mean([T[:3, 3] for T in transforms], axis=0)
+        result = transforms[0].copy()
+        result[:3, 3] = avg_t
+        return result
+
     def _get_stack_grasp_poses(self, pick_tag_id, place_tag_id, place_xy_offset,
                                stack_step=None):
-        """Detect AprilTags and return (pick_pose, place_pose).
+        """Detect AprilTags and return (pick_pose, place_pose, pick_detected, place_detected).
 
         Stack (forward_1 / forward_2):
-          - Detect both tags from the same camera for relative-XY accuracy.
-          - Cache the pick cup tag pose (used for unstack place later).
+          Priority 1 — cameras that see BOTH tags simultaneously (best relative-XY
+                        accuracy).  If multiple such cameras exist, their positions
+                        are averaged with equal weights.
+          Priority 2 — if no single camera sees both tags, use cameras that see
+                        each tag individually (pick cameras for pick pose, place
+                        cameras for place pose), averaged per tag.
+          Priority 3 — stereo triangulation fallback when no camera sees a tag.
 
         Unstack (reverse_1 / reverse_2):
-          - Pick cup is on top → detect its tag directly.
-          - Place position = cached original position of pick cup.
+          Pick cup is on top → detect its tag from any camera (first found).
+          Place position = cached original position of pick cup (no tag detection).
 
         Returns:
-            (pick_grasp_pose, place_grasp_pose) — either may be None on failure
+            (pick_grasp_pose, place_grasp_pose, pick_detected, place_detected)
+            pick_detected / place_detected: bool — whether the tag was actually seen.
+            On failure, returns (None, None, False, False).
         """
         pick_hover, place_z, place_hover = self._STACK_STEP_OFFSETS.get(
             stack_step, (0.07, 0.01, 0.10)
@@ -649,36 +670,70 @@ class MotionPlanner():
         T_place_wt = None
 
         if place_xy_offset:
-            # Unstack: pick cup is on top — detect its tag directly.
+            # Unstack: pick cup is on top — average across all cameras that see it.
+            solo_picks: List[np.ndarray] = []
             for camera in self.cameras.values():
                 tp = detect_single_tag_world_pose(camera, pick_tag_id)
                 if tp is not None:
-                    T_pick_wt = tp
-                    break
-            if T_pick_wt is None:
+                    solo_picks.append(tp)
+            if solo_picks:
+                T_pick_wt = self._average_tag_poses(solo_picks)
+                log.info(f"[StackCups] Pick tag detected by {len(solo_picks)} camera(s) (reverse) — averaged pose")
+            else:
                 T_pick_wt = detect_tag_world_pose_stereo(self.cameras, pick_tag_id)
 
+            pick_detected = T_pick_wt is not None
+            # Place uses cache — not a live tag detection.
+            place_detected = None  # N/A for reverse steps
+
         else:
-            # Stack: prefer one camera seeing both tags for relative-XY accuracy.
+            # Stack: scan all cameras and categorise detections.
+            both_picks: List[np.ndarray] = []   # T_pick  from cameras seeing BOTH tags
+            both_places: List[np.ndarray] = []  # T_place from cameras seeing BOTH tags
+            solo_picks: List[np.ndarray] = []   # T_pick  from cameras seeing pick only
+            solo_places: List[np.ndarray] = []  # T_place from cameras seeing place only
+
             for camera in self.cameras.values():
                 tp  = detect_single_tag_world_pose(camera, pick_tag_id)
                 tpl = detect_single_tag_world_pose(camera, place_tag_id)
                 if tp is not None and tpl is not None:
-                    T_pick_wt, T_place_wt = tp, tpl
-                    break
+                    both_picks.append(tp)
+                    both_places.append(tpl)
+                else:
+                    if tp  is not None: solo_picks.append(tp)
+                    if tpl is not None: solo_places.append(tpl)
 
-            # Fallback: stereo triangulation per tag
-            if T_pick_wt is None:
-                T_pick_wt  = detect_tag_world_pose_stereo(self.cameras, pick_tag_id)
-            if T_place_wt is None:
-                T_place_wt = detect_tag_world_pose_stereo(self.cameras, place_tag_id)
+            if both_picks:
+                # Priority 1: average across all cameras seeing both tags
+                T_pick_wt  = self._average_tag_poses(both_picks)
+                T_place_wt = self._average_tag_poses(both_places)
+                log.info(
+                    f"[StackCups] Both tags visible in {len(both_picks)} camera(s) "
+                    f"— averaged pick/place pose"
+                )
+            else:
+                # Priority 2: use per-tag cameras independently
+                if solo_picks:
+                    T_pick_wt = self._average_tag_poses(solo_picks)
+                    log.info(f"[StackCups] Pick tag detected by {len(solo_picks)} camera(s) (solo)")
+                else:
+                    T_pick_wt = detect_tag_world_pose_stereo(self.cameras, pick_tag_id)
+
+                if solo_places:
+                    T_place_wt = self._average_tag_poses(solo_places)
+                    log.info(f"[StackCups] Place tag detected by {len(solo_places)} camera(s) (solo)")
+                else:
+                    T_place_wt = detect_tag_world_pose_stereo(self.cameras, place_tag_id)
+
+            pick_detected = T_pick_wt is not None
+            place_detected = T_place_wt is not None
 
             # Cache pick cup's original position keyed by tag_id (used for unstack place).
             if T_pick_wt is not None:
                 self._tag_position_cache[pick_tag_id] = T_pick_wt
 
         if T_pick_wt is None:
-            return None, None
+            return None, None, False, False
 
         pick_pose = self._make_grasp_pose_from_tag_world(
             T_pick_wt, z_offset=-self._GRASP_BELOW_TAG, hover_offset=pick_hover,
@@ -688,18 +743,24 @@ class MotionPlanner():
             # Unstack: use cached position (defaults pre-populated in __init__,
             # overwritten by forward steps when tag is detected).
             cached_T = self._tag_position_cache.get(pick_tag_id)
+            if cached_T is None:
+                log.warning(
+                    f"[StackCups] No cached position for pick tag {pick_tag_id} "
+                    f"— cannot compute unstack place pose."
+                )
+                return None, None, False, False
             place_pose = self._make_grasp_pose_from_tag_world(
                 cached_T, z_offset=place_z, hover_offset=place_hover,
                 xy_offset=self._PLACE_TAG_XY_OFFSET)
         else:
             # Stack: place on top of the place tag's current position.
             if T_place_wt is None:
-                return None, None
+                return None, None, pick_detected, False
             place_pose = self._make_grasp_pose_from_tag_world(
                 T_place_wt, z_offset=place_z, hover_offset=place_hover,
                 xy_offset=self._PLACE_TAG_XY_OFFSET)
 
-        return pick_pose, place_pose
+        return pick_pose, place_pose, pick_detected, place_detected
 
     def _get_drawer_grasp_poses(self, tag_id: int, action: str = "open"):
         """Compute pick and place poses for the drawer task via AprilTag detection.
@@ -723,7 +784,10 @@ class MotionPlanner():
             T_wt = detect_tag_world_pose_stereo(self.cameras, tag_id, tag_size=0.06)
         if T_wt is None:
             log.warning(f"[MotionPlanner] AprilTag {tag_id} not found for drawer task.")
+            self.last_drawer_tag_pose = None
             return None, None
+
+        self.last_drawer_tag_pose = T_wt
 
         # Handle position in world frame
         p_handle = T_wt[:3, :3] @ self._HANDLE_TAG_OFFSET + T_wt[:3, 3]
@@ -753,6 +817,32 @@ class MotionPlanner():
         place_pose = {"T_wg": T_place, "pre_T_wg": T_place.copy()}
 
         return pick_pose, place_pose
+
+    @staticmethod
+    def compute_drawer_yaw_deg(T_wt: np.ndarray) -> float:
+        """Compute how many degrees the drawer is rotated left/right from front-facing.
+
+        Assumes the tag's Z axis is the drawer face normal, and that the face
+        normal points toward the robot (approximately -X world direction) when
+        the drawer is perfectly front-facing.
+
+        Returns:
+            Signed angle in degrees.  Positive = rotated left (+Y side toward robot),
+            negative = rotated right (-Y side toward robot), from the robot's perspective.
+        """
+        face_normal = T_wt[:3, 2]          # tag Z axis in world frame
+        n_xy = face_normal[:2].copy()
+        norm = float(np.linalg.norm(n_xy))
+        if norm < 1e-6:
+            return 0.0
+        n_xy /= norm
+        # Expected when front-facing: face normal ≈ [-1, 0] (toward robot at -X)
+        expected = np.array([-1.0, 0.0])
+        cos_a = float(np.clip(np.dot(n_xy, expected), -1.0, 1.0))
+        angle = float(np.degrees(np.arccos(cos_a)))
+        # Sign: +Y component → rotated left; -Y → rotated right
+        sign = float(np.sign(n_xy[1])) if abs(n_xy[1]) > 1e-6 else 1.0
+        return sign * angle
 
     def generate_drawer_trajectory(
             self,

@@ -28,6 +28,12 @@ _CHECKLIST_PREAMBLE = (
     "Use all images together to evaluate the checklist items. "
     "If one view is ambiguous because of occlusion or perspective, rely more on the clearer external views."
 )
+_CHECKLIST_PREAMBLE_DRAWER = (
+    "The provided images are two views of the same scene at the same time: "
+    "one from a wrist-mounted camera on the robot arm, and one from a table-level camera. "
+    "Use both images together to evaluate the checklist items. "
+    "If one view is ambiguous because of occlusion or perspective, rely more on the clearer view."
+)
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +57,7 @@ class VLMChecklistPolicy(BaseResetPolicy):
         self.tau_reset = tau_reset
         self._checklists: dict = {}  # task_name -> loaded checklist dict
         self.last_eval: Optional[dict] = None
+        self.last_success: Optional[bool] = None  # set by needs_reset(); None if no success_item defined
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -63,23 +70,33 @@ class VLMChecklistPolicy(BaseResetPolicy):
         episode_idx: int,
         task=None,
         observation=None,
+        detection_info: dict = None,
     ) -> bool:
         if task is None or observation is None:
             self.last_eval = None
+            self.last_success = None
             return False
 
         checklist = self._load_or_generate(task)
-        score, per_item = self._evaluate(checklist, task, observation)
+        score, per_item, success = self._evaluate(
+            checklist, task, observation, detection_info=detection_info
+        )
         self.last_eval = {
             "task_name": task.name,
             "score": score,
             "items": per_item,
         }
+        self.last_success = success  # None when no success_item defined in checklist
 
         reset = score < self.tau_reset
-        log.info(f"[VLMChecklistPolicy] task={task.name} | score={score:.3f} | tau={self.tau_reset} | needs_reset={reset}")
+
+        log.info(
+            f"[VLMChecklistPolicy] task={task.name} | score={score:.3f} | tau={self.tau_reset} | "
+            f"needs_reset={reset} | success={success}"
+        )
         for item in per_item:
-            log.info(f"  [{item['answer'].upper():3s}] (w={item['weight']:.2f}) {item['question']}")
+            marker = "★" if item.get("success_item") else " "
+            log.info(f"  {marker}[{item['answer'].upper():3s}] (w={item['weight']:.2f}) {item['question']}")
 
         return reset
 
@@ -169,40 +186,91 @@ class VLMChecklistPolicy(BaseResetPolicy):
     # ------------------------------------------------------------------ #
 
     def _evaluate(
-        self, checklist: dict, task, observation: dict
-    ) -> Tuple[float, List[dict]]:
+        self, checklist: dict, task, observation: dict, detection_info: dict = None
+    ) -> Tuple[float, List[dict], Optional[bool]]:
+        """Evaluate checklist against observation.
+
+        Returns:
+            score:          weighted reset score
+            per_item:       per-item details
+            success:        True/False from success_item answers; None if none defined
+            reset_override: True  → mixed group answers → force reset
+                            False → all-wrong group answers → force retry (no reset)
+                            None  → no group constraint, use score threshold
+        """
         items = checklist["items"]
         items_block = "\n".join(
             f"{item['id']}. {item['question']}" for item in items
         )
-        prompt = _CHECKLIST_PREAMBLE + "\n\n" + EVAL_PROMPT.format(
+        if task.task_type == "open_drawer":
+            preamble = _CHECKLIST_PREAMBLE_DRAWER
+            obs = {k: v for k, v in observation.items() if "front" not in k}
+        else:
+            preamble = _CHECKLIST_PREAMBLE
+            obs = observation
+
+        detection_block = ""
+        if detection_info:
+            det_lines = " / ".join(
+                f"{obj}: {status}" for obj, status in detection_info.items()
+            )
+            detection_block = f"\nObject detection status: {det_lines}\n"
+
+        prompt = preamble + detection_block + "\n" + EVAL_PROMPT.format(
             task_description=task.language_task,
             items_block=items_block,
         )
-        raw = self.vqa_client.ask_text(observation, prompt)
+        if detection_block:
+            log.info(f"[VLMChecklistPolicy] task={task.name} | detection:{detection_block.strip()}")
+        raw = self.vqa_client.ask_text(obs, prompt)
 
         answers = self._parse_answers(raw, items)
+
+        # Determine which reset_groups have mixed (inconsistent) answers.
+        # Mixed group items score 0 to drive score below tau_reset.
+        group_answers: dict = {}
+        for item in items:
+            gid = item.get("reset_group")
+            if gid is not None:
+                ans = answers.get(str(item["id"]), "no")
+                group_answers.setdefault(gid, set()).add(ans)
+        mixed_groups = {gid for gid, ans_set in group_answers.items() if len(ans_set) > 1}
 
         per_item: List[dict] = []
         weighted_sum = 0.0
         weight_total = 0.0
+        success_answers: List[bool] = []
+
         for item in items:
             ans = answers.get(str(item["id"]), "no")
             yes = ans == "yes"
             w = float(item["weight"])
-            weighted_sum += w * (1.0 if yes else 0.0)
+            is_success_item = bool(item.get("success_item", False))
+            success_answer = item.get("success_answer", "yes")
+
+            if is_success_item:
+                success_answers.append(ans == success_answer)
+
+            # Mixed reset_group → contribute 0 to pull score below reset threshold
+            in_mixed_group = item.get("reset_group") in mixed_groups
+            weighted_sum += w * (0.0 if in_mixed_group else (1.0 if yes else 0.0))
             weight_total += w
+
             per_item.append(
                 {
                     "id": item["id"],
                     "question": item["question"],
                     "weight": item["weight"],
                     "answer": ans,
+                    "success_item": is_success_item,
+                    "success_answer": success_answer,
                 }
             )
 
         score = weighted_sum / weight_total if weight_total > 0 else 0.0
-        return score, per_item
+        success = all(success_answers) if success_answers else None
+
+        return score, per_item, success
 
     @staticmethod
     def _parse_answers(raw: str, items: List[dict]) -> dict:
@@ -232,7 +300,7 @@ class VLMChecklistPolicy(BaseResetPolicy):
         # Fallback: permissive regex per item id.
         out = {}
         for item in items:
-            pat = rf'["\']?{re.escape(str(item["id"]))}["\']?\s*:\s*["\']?(yes|no)["\']?'
+            pat = rf'["\']?{re.escape(str(item["id"]))}["\']?\s*:\s*["\']?(yes|no)["\']?(?!\d)'
             m = re.search(pat, raw, re.IGNORECASE)
             if m:
                 out[str(item["id"])] = m.group(1).lower()

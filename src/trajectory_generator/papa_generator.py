@@ -61,11 +61,16 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
                 metadata["elapsed_time"] = time.time() - start_time
                 return GenerationResult(trajectory=None, metadata=metadata)
 
+            # Store identified object names regardless of perception outcome
+            metadata["pick_object"] = pick_object
+            metadata["place_object"] = place_object
+
             # 2. Perception for pick object
             pick_perception = self._query_perception_with_retry(env, pick_object)
             if not pick_perception["responses_result_is_valid"]:
                 metadata["generation_failed"] = True
                 metadata["reason"] = "pick_perception_failed"
+                metadata["pick_detected"] = False
                 metadata["elapsed_time"] = time.time() - start_time
                 return GenerationResult(trajectory=None, metadata=metadata)
 
@@ -74,6 +79,8 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
             if not place_perception["responses_result_is_valid"]:
                 metadata["generation_failed"] = True
                 metadata["reason"] = "place_perception_failed"
+                metadata["pick_detected"] = True
+                metadata["place_detected"] = False
                 metadata["elapsed_time"] = time.time() - start_time
                 return GenerationResult(trajectory=None, metadata=metadata)
 
@@ -85,10 +92,8 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
             )
 
             metadata.update({
-                "pick_object": pick_object,
-                "place_object": place_object,
-                "pick_perception_valid": True,
-                "place_perception_valid": True,
+                "pick_detected": True,
+                "place_detected": True,
                 "elapsed_time": time.time() - start_time,
             })
 
@@ -118,6 +123,14 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
                 metadata["elapsed_time"] = time.time() - start_time
                 return GenerationResult(trajectory=None, metadata=metadata)
 
+            # Compute drawer rotation angle from detected tag pose
+            T_wt = self.motion_planner.last_drawer_tag_pose
+            if T_wt is not None:
+                from motion_planner.motion_planner import MotionPlanner
+                metadata["drawer_rotation_deg"] = round(
+                    MotionPlanner.compute_drawer_yaw_deg(T_wt), 1
+                )
+
             metadata.update({
                 "pick_tag_id": task.pick_tag_id,
                 "stack_step": task.stack_step,
@@ -139,22 +152,27 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
         metadata = {"generation_failed": False, "elapsed_time": 0.0}
 
         try:
-            trajectory, events, key_poses = self.motion_planner.plan_stack_cups(
-                pick_tag_id=task.pick_tag_id,
-                place_tag_id=task.place_tag_id,
-                place_xy_offset=task.place_xy_offset,
-                stack_step=task.stack_step,
-            )
+            (trajectory, events, key_poses), pick_detected, place_detected = \
+                self.motion_planner.plan_stack_cups(
+                    pick_tag_id=task.pick_tag_id,
+                    place_tag_id=task.place_tag_id,
+                    place_xy_offset=task.place_xy_offset,
+                    stack_step=task.stack_step,
+                )
 
             if trajectory is None:
                 metadata["generation_failed"] = True
                 metadata["reason"] = "apriltag_not_found"
+                metadata["pick_detected"] = bool(pick_detected)
+                metadata["place_detected"] = bool(place_detected) if place_detected is not None else None
                 metadata["elapsed_time"] = time.time() - start_time
                 return GenerationResult(trajectory=None, metadata=metadata)
 
             metadata.update({
                 "pick_tag_id": task.pick_tag_id,
                 "place_tag_id": task.place_tag_id,
+                "pick_detected": bool(pick_detected),
+                "place_detected": bool(place_detected) if place_detected is not None else None,
                 "elapsed_time": time.time() - start_time,
             })
 
