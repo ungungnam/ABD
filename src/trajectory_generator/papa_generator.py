@@ -123,13 +123,9 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
                 metadata["elapsed_time"] = time.time() - start_time
                 return GenerationResult(trajectory=None, metadata=metadata)
 
-            # Compute drawer rotation angle from detected tag pose
-            T_wt = self.motion_planner.last_drawer_tag_pose
-            if T_wt is not None:
-                from motion_planner.motion_planner import MotionPlanner
-                metadata["drawer_rotation_deg"] = round(
-                    MotionPlanner.compute_drawer_yaw_deg(T_wt), 1
-                )
+            rot = self.motion_planner.last_drawer_rotation_deg
+            if rot is not None:
+                metadata["drawer_rotation_deg"] = round(rot, 1)
 
             metadata.update({
                 "pick_tag_id": task.pick_tag_id,

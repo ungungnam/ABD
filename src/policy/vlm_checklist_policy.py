@@ -251,10 +251,17 @@ class VLMChecklistPolicy(BaseResetPolicy):
             if is_success_item:
                 success_answers.append(ans == success_answer)
 
-            # Mixed reset_group → contribute 0 to pull score below reset threshold
             in_mixed_group = item.get("reset_group") in mixed_groups
-            weighted_sum += w * (0.0 if in_mixed_group else (1.0 if yes else 0.0))
-            weight_total += w
+            in_reset_group = item.get("reset_group") is not None
+            if in_reset_group:
+                # Consistency check: consistent answers (all-yes or all-no) → 1
+                # Mixed answers → 0 (force reset via low score)
+                # Use abs(w) so negative-weight items still contribute positively
+                # when answers are consistent.
+                weighted_sum += abs(w) * (0.0 if in_mixed_group else 1.0)
+            else:
+                weighted_sum += w * (1.0 if yes else 0.0)
+            weight_total += abs(w)
 
             per_item.append(
                 {

@@ -5,7 +5,7 @@
       "question": "Is the robot in a safe, collision-free configuration?",
       "weight": 0.4
     },
-    {
+    { 
       "id": 2,
       "question": "Is the gripper or end-effector intact and functioning properly?",
       "weight": 0.4

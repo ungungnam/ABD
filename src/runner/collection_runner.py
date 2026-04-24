@@ -228,6 +228,16 @@ class CollectionRunner:
                 # Move robot to init pose
                 self.env.go_to_init_pose()
 
+                # Capture yaw reference only when no reference exists yet
+                # (first run or after human reset). Both open and close then measure
+                # rotation relative to this single front-facing baseline.
+                if (
+                    task.task_type == "open_drawer"
+                    and not self.is_dummy
+                    and hasattr(self.generator, "motion_planner")
+                    and self.generator.motion_planner._drawer_ref_yaw is None
+                ):
+                    self.generator.motion_planner.measure_drawer_rotation(task.pick_tag_id)
 
                 # skip_to_validation = (
                 #     not self.is_dummy
@@ -342,6 +352,7 @@ class CollectionRunner:
                     exec_result = self.executor.execute(
                         gen_result.trajectory, gen_result.events, task.language_task,
                         key_poses=gen_result.key_poses,
+                        use_ik_fallback=(task.task_type != "pick_place"),
                     )
 
                 # Module C: Validate task success
@@ -363,6 +374,16 @@ class CollectionRunner:
                         val_obs = self.env.get_observation()
                     else:
                         val_obs = exec_result.final_obs
+
+                    # For open_drawer: measure current rotation relative to generation-time reference
+                    if (
+                        task.task_type == "open_drawer"
+                        and not self.is_dummy
+                        and hasattr(self.generator, "motion_planner")
+                    ):
+                        rot = self.generator.motion_planner.measure_drawer_rotation(task.pick_tag_id)
+                        if rot is not None:
+                            gen_result.metadata["drawer_rotation_deg"] = round(rot, 1)
 
                     detection_info = self._build_detection_info(task, gen_result)
 
@@ -765,6 +786,8 @@ class CollectionRunner:
             self.task_scheduler.reset_to_forward()
             if hasattr(self.validator, "reset_state"):
                 self.validator.reset_state()
+            if hasattr(self.generator, "motion_planner"):
+                self.generator.motion_planner.reset_drawer_reference()
         return should_continue, confirm_time
 
     # def _check_intermediate_tag(self, task) -> bool:

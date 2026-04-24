@@ -21,8 +21,10 @@ class MotionPlanner():
         #   tag 6 (pink):   [x, y] = [0.3476801,  0.15095109]
         #   tag 5 (purple): [x, y] = [0.3476801, -0.05095109]
         self._tag_position_cache: dict = self._make_default_tag_cache()
-        # Last detected drawer tag pose (set in _get_drawer_grasp_poses)
+        # Last detected drawer tag pose and yaw delta from pre-execution reference
         self.last_drawer_tag_pose: Optional[np.ndarray] = None
+        self.last_drawer_rotation_deg: Optional[float] = None
+        self._drawer_ref_yaw: Optional[float] = None  # atan2 yaw at init pose before execution
 
     @classmethod
     def _make_default_tag_cache(cls) -> dict:
@@ -94,14 +96,15 @@ class MotionPlanner():
         return partial_trajectory, partial_events, key_poses
 
     def plan_pick_place(self, pick_perception, place_perception, vlm_action=None):
-        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.05)
-        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.05)
+        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.06)
+        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.06)
         if pick_grasp_pose and place_grasp_pose:
             trajectory, events, key_poses = self.generate_trajectory(
                 vlm_action=vlm_action,
                 pick_grasp_pose=pick_grasp_pose,
                 place_grasp_pose=place_grasp_pose,
-                post_lift=False,
+                post_lift=True,
+                post_lift_height=0.06,
                 descent_max_step=0.015,
             )
         else:
@@ -411,6 +414,7 @@ class MotionPlanner():
             close_rot_thresh_deg: float = 10.0,
             ext_len=3,
             post_lift: bool = True,
+            post_lift_height: float = 0.15,
             descent_max_step: float = 0.015,
             lift_max_step: float = 0.05,
     ) -> Tuple[List[np.ndarray], List[Dict[str, Any]]]:
@@ -452,9 +456,9 @@ class MotionPlanner():
 
             if post_lift:
                 post_pick = T_pick.copy()
-                post_pick[:3, 3] = T_pick[:3, 3] + np.array([0.0, 0.0, 0.15])
+                post_pick[:3, 3] = T_pick[:3, 3] + np.array([0.0, 0.0, post_lift_height])
                 post_place = T_place.copy()
-                post_place[:3, 3] = T_place[:3, 3] + np.array([0.0, 0.0, 0.15])
+                post_place[:3, 3] = T_place[:3, 3] + np.array([0.0, 0.0, post_lift_height])
                 key_poses = [pre_pick, T_pick, post_pick, pre_place, T_place, post_place]
 
             # 1) cur -> vlm(pick)
@@ -775,17 +779,25 @@ class MotionPlanner():
         Pre-pick hovers approach_dist in +X from handle so the robot comes
         from the +X side and slides in.
         """
-        T_wt = None
+        detections = []
         for camera in self.cameras.values():
-            T_wt = detect_single_tag_world_pose(camera, tag_id, tag_size=0.06)
-            if T_wt is not None:
-                break
-        if T_wt is None:
+            T = detect_single_tag_world_pose(camera, tag_id, tag_size=0.06)
+            if T is not None:
+                detections.append(T)
+        if detections:
+            T_wt = self._average_tag_poses(detections)
+            normals = [T[:3, 2] for T in detections]
+            avg_normal = np.mean(normals, axis=0) / np.linalg.norm(np.mean(normals, axis=0))
+        else:
             T_wt = detect_tag_world_pose_stereo(self.cameras, tag_id, tag_size=0.06)
-        if T_wt is None:
+            avg_normal = T_wt[:3, 2] if T_wt is not None else None
+
+        if T_wt is None or avg_normal is None:
             log.warning(f"[MotionPlanner] AprilTag {tag_id} not found for drawer task.")
             self.last_drawer_tag_pose = None
             return None, None
+
+        log.info(f"[Drawer] Tag detected by {len(detections)} camera(s) for trajectory planning")
 
         self.last_drawer_tag_pose = T_wt
 
@@ -800,10 +812,11 @@ class MotionPlanner():
         T_place[:3, :3] = R
 
         if action == "open":
-            # Pick: grasp closed handle
-            T_pick[:3, 3] = p_handle
-            # Place: pull -X (open drawer)
-            T_place[:3, 3] = p_handle + np.array([-self._DRAWER_PULL_DIST, 0.0, 0.0])
+            # Pick: grasp closed handle, shift 1 cm toward robot (-X)
+            T_pick[:3, 3] = p_handle + np.array([-0.01, 0.0, 0.0])
+            # Place: pull -X; randomly add up to 3 cm extra
+            extra = np.random.uniform(0.0, 0.03)
+            T_place[:3, 3] = p_handle + np.array([-(self._DRAWER_PULL_DIST + extra), 0.0, 0.0])
         else:
             # Pick: open handle position (closed handle - pull_dist), -1cm X buffer, -3cm Z
             T_pick[:3, 3] = p_handle + np.array([-self._DRAWER_PULL_DIST, 0.0, -0.03])
@@ -817,6 +830,63 @@ class MotionPlanner():
         place_pose = {"T_wg": T_place, "pre_T_wg": T_place.copy()}
 
         return pick_pose, place_pose
+
+    def reset_drawer_reference(self):
+        """Clear yaw reference so the next measure_drawer_rotation() call captures a new one."""
+        self._drawer_ref_yaw = None
+        self.last_drawer_rotation_deg = None
+
+    def measure_drawer_rotation(self, tag_id: int) -> Optional[float]:
+        """Measure how far the drawer has rotated since the last reset_drawer_reference() call.
+
+        Uses atan2(R[1,0], R[0,0]) from the tag's world rotation matrix, which is
+        robust for both vertical and horizontal tags (unlike Z-axis dot-product which
+        breaks when the tag Z-axis is nearly vertical).
+
+        First call after reset_drawer_reference(): captures the reference yaw, returns 0.0.
+        Subsequent calls: return the signed delta from the reference in degrees.
+        Returns None if the tag cannot be detected.
+        """
+        detections = []
+        for camera in self.cameras.values():
+            T = detect_single_tag_world_pose(camera, tag_id, tag_size=0.06)
+            if T is not None:
+                detections.append(T)
+        if not detections:
+            T_wt = detect_tag_world_pose_stereo(self.cameras, tag_id, tag_size=0.06)
+            if T_wt is None:
+                return None
+            detections = [T_wt]
+
+        # Average atan2 yaw across detections (handles per-camera noise independently)
+        yaws = [np.degrees(np.arctan2(float(T[1, 0]), float(T[0, 0]))) for T in detections]
+        # Circular mean to handle wraparound
+        avg_yaw = float(np.degrees(np.arctan2(
+            np.mean(np.sin(np.radians(yaws))),
+            np.mean(np.cos(np.radians(yaws))),
+        )))
+
+        log.info(
+            f"[Drawer] measure_rotation: {len(detections)} cam(s) | "
+            f"yaws={[round(y, 1) for y in yaws]} → avg={avg_yaw:.1f} deg"
+        )
+
+        if self._drawer_ref_yaw is None:
+            self._drawer_ref_yaw = avg_yaw
+            self.last_drawer_rotation_deg = 0.0
+            log.info(f"[Drawer] reference captured: {avg_yaw:.1f} deg → delta=0.0")
+        else:
+            raw_delta = avg_yaw - self._drawer_ref_yaw
+            # Wrap to [-180, 180]
+            delta = float(np.degrees(np.arctan2(
+                np.sin(np.radians(raw_delta)), np.cos(np.radians(raw_delta))
+            )))
+            self.last_drawer_rotation_deg = delta
+            log.info(
+                f"[Drawer] ref={self._drawer_ref_yaw:.1f} cur={avg_yaw:.1f} → delta={delta:.1f} deg"
+            )
+
+        return self.last_drawer_rotation_deg
 
     @staticmethod
     def compute_drawer_yaw_deg(T_wt: np.ndarray) -> float:
@@ -836,8 +906,8 @@ class MotionPlanner():
         if norm < 1e-6:
             return 0.0
         n_xy /= norm
-        # Expected when front-facing: face normal ≈ [-1, 0] (toward robot at -X)
-        expected = np.array([-1.0, 0.0])
+        # Expected when front-facing: face normal ≈ [+1, 0] (away from robot, into drawer)
+        expected = np.array([1.0, 0.0])
         cos_a = float(np.clip(np.dot(n_xy, expected), -1.0, 1.0))
         angle = float(np.degrees(np.arccos(cos_a)))
         # Sign: +Y component → rotated left; -Y → rotated right
@@ -928,7 +998,7 @@ class MotionPlanner():
             best_grasp_pose = self.sample_best_grasp(grasp_poses)
             forced_R = np.array([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]])
             best_grasp_pose['T_wg'][:3, :3] = forced_R
-            best_grasp_pose['T_wg'][2, 3] -= 0.01   # pick 1 cm deeper in Z
+            best_grasp_pose['T_wg'][2, 3] += 0.005   # shift 0.5 cm up in Z
             best_grasp_pose['pre_T_wg'][:3, :3] = forced_R
             best_grasp_pose['pre_T_wg'][:3, 3] = (
                 best_grasp_pose['T_wg'][:3, 3] + np.array([0.0, 0.0, hover_offset])

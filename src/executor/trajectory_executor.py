@@ -50,7 +50,7 @@ class TrajectoryExecutor:
         self.dataset_recorder = dataset_recorder
 
     def execute(self, trajectory, events, language_task: str,
-                key_poses=None) -> ExecutionResult:
+                key_poses=None, use_ik_fallback: bool = True) -> ExecutionResult:
         """Execute trajectory waypoints and return execution metadata.
 
         Adapted from PaPA's PaPA.apply_action() (PaPA/src/papa/papa.py lines 124-151).
@@ -58,6 +58,7 @@ class TrajectoryExecutor:
         key_poses: list of 4x4 SE(3) matrices (pre_pick, pick, pre_place, place).
             IK fallback is applied only to waypoints within _IK_KEY_POSE_RADIUS_M of
             any key pose.  Pass None (default) to apply fallback to every waypoint.
+        use_ik_fallback: set False to skip IK fallback entirely for all waypoints.
         """
         start_time = time.time()
 
@@ -86,7 +87,7 @@ class TrajectoryExecutor:
                 frame = self._make_frame(obs, pose_6d, gripper, language_task)
                 self.dataset_recorder.add_frame(frame)
 
-            if ik_indices is None or i in ik_indices:
+            if use_ik_fallback and (ik_indices is None or i in ik_indices):
                 obs, reward, done = self._step_with_ik_fallback(waypoint, pose_6d, gripper)
             else:
                 obs, reward, done = self.env.step(pose_6d, gripper)
