@@ -998,7 +998,7 @@ class MotionPlanner():
             best_grasp_pose = self.sample_best_grasp(grasp_poses)
             forced_R = np.array([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]])
             best_grasp_pose['T_wg'][:3, :3] = forced_R
-            best_grasp_pose['T_wg'][2, 3] += 0.005   # shift 0.5 cm up in Z
+            # best_grasp_pose['T_wg'][2, 3] += 0.005   # shift 0.5 cm up in Z
             best_grasp_pose['pre_T_wg'][:3, :3] = forced_R
             best_grasp_pose['pre_T_wg'][:3, 3] = (
                 best_grasp_pose['T_wg'][:3, 3] + np.array([0.0, 0.0, hover_offset])
