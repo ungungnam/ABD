@@ -345,7 +345,7 @@ class CollectionRunner:
                         gripper_effort = 1000
                     else:
                         gripper_close = 0
-                        gripper_effort = 300
+                        gripper_effort = 1000
 
                     self.env.set_gripper_close(gripper_close)
                     self.env.set_gripper_effort(gripper_effort)
