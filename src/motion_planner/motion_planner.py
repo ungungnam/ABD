@@ -96,19 +96,19 @@ class MotionPlanner():
         return partial_trajectory, partial_events, key_poses
 
     def plan_pick_place(self, pick_perception, place_perception, vlm_action=None):
-        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.05)
-        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.05)
+        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.10)
+        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.10)
         if pick_grasp_pose and place_grasp_pose:
             trajectory, events, key_poses = self.generate_trajectory(
                 vlm_action=vlm_action,
                 pick_grasp_pose=pick_grasp_pose,
                 place_grasp_pose=place_grasp_pose,
                 post_lift=True,
-                post_lift_height=0.05,
-                descent_max_step=0.015,
-                lift_max_step=0.03,
+                post_lift_height=0.10,
+                descent_max_step=0.010,
+                lift_max_step=0.010,
                 max_step=0.03,
-                ext_len=6,
+                ext_len=3,
             )
         else:
             trajectory, events, key_poses = self.generate_trajectory(vlm_action=vlm_action)

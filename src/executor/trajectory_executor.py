@@ -90,7 +90,7 @@ class TrajectoryExecutor:
             if use_ik_fallback and (ik_indices is None or i in ik_indices):
                 obs, reward, done = self._step_with_ik_fallback(waypoint, pose_6d, gripper)
             else:
-                obs, reward, done = self.env.step(pose_6d, gripper)
+               obs, reward, done = self.env.step(pose_6d, gripper)
 
         return ExecutionResult(
             final_obs=obs,
