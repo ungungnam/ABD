@@ -106,6 +106,8 @@ class MotionPlanner():
                 post_lift=True,
                 post_lift_height=0.06,
                 descent_max_step=0.015,
+                lift_max_step=0.03,
+                max_step=0.03,
             )
         else:
             trajectory, events, key_poses = self.generate_trajectory(vlm_action=vlm_action)
@@ -146,26 +148,24 @@ class MotionPlanner():
 
         for i in range(len(used_cameras)):
             for j in range(len(used_cameras)):
-                if i > j:
-                    camera_1 = used_cameras[i]
-                    camera_2 = used_cameras[j]
-
-                    mask_1 = perception[camera_1]['mask']
-                    mask_2 = perception[camera_2]['mask']
-
-                    mask_1 = np.array(mask_1).reshape((self.cameras[camera_1].height, self.cameras[camera_1].width))
-                    mask_2 = np.array(mask_2).reshape((self.cameras[camera_2].height, self.cameras[camera_2].width))
-
-                    score, pts = self._get_score(
-                        cameras=[camera_1, camera_2],
-                        masks=[mask_1, mask_2]
-                    )
-
-                    if score > best_score:
-                        best_score = score
-                        best_pts = pts
-                else:
+                if i <= j:
                     continue
+                camera_1 = used_cameras[i]
+                camera_2 = used_cameras[j]
+
+                mask_1 = np.array(perception[camera_1]['mask']).reshape(
+                    (self.cameras[camera_1].height, self.cameras[camera_1].width))
+                mask_2 = np.array(perception[camera_2]['mask']).reshape(
+                    (self.cameras[camera_2].height, self.cameras[camera_2].width))
+
+                score, pts = self._get_score(
+                    cameras=[camera_1, camera_2],
+                    masks=[mask_1, mask_2]
+                )
+
+                if score > best_score:
+                    best_score = score
+                    best_pts = pts
 
         return best_pts
 
@@ -255,8 +255,8 @@ class MotionPlanner():
         cone,
         camera,
         mask,
-        depth_range=(0.1, 1.0), 
-        n_depth=100,
+        depth_range=(0.1, 1.0),
+        n_depth=300,
         pick='frontmost'
     ):
         H, W = mask.shape
@@ -417,6 +417,7 @@ class MotionPlanner():
             post_lift_height: float = 0.15,
             descent_max_step: float = 0.015,
             lift_max_step: float = 0.05,
+            max_step: float = 0.05,
     ) -> Tuple[List[np.ndarray], List[Dict[str, Any]]]:
         """
         Return:
@@ -466,12 +467,12 @@ class MotionPlanner():
                 T_vlm = self._make_vlm_subgoal(vlm_action, step=step, keep_rotation=True)
             else:
                 T_vlm = T_cur
-            _append(traj_T, self._interpolate_poses_linear(T_cur, T_vlm))
+            _append(traj_T, self._interpolate_poses_linear(T_cur, T_vlm, max_step=max_step))
             traj_T = self._prune_duplicates(traj_T)
 
             # 2) -> pre_pick -> pick
             if not _is_T_close(T_vlm, pre_pick):
-                seg = self._interpolate_poses_linear(T_vlm, pre_pick)
+                seg = self._interpolate_poses_linear(T_vlm, pre_pick, max_step=max_step)
                 _append(traj_T, self._prune_duplicates(seg))
 
             T_at_pre_pick = traj_T[-1] if traj_T else T_vlm
@@ -487,12 +488,12 @@ class MotionPlanner():
                 seg = self._interpolate_poses_linear(traj_T[-1], post_pick, max_step=lift_max_step)
                 _append(traj_T, self._prune_duplicates(seg))
 
-            _append(traj_T, self._interpolate_poses_linear(traj_T[-1], T_cur))
+            _append(traj_T, self._interpolate_poses_linear(traj_T[-1], T_cur, max_step=max_step))
 
             # 4) -> pre_place -> place
             T_start = traj_T[-1]
             if not _is_T_close(T_start, pre_place):
-                seg = self._interpolate_poses_linear(T_start, pre_place)
+                seg = self._interpolate_poses_linear(T_start, pre_place, max_step=max_step)
                 _append(traj_T, self._prune_duplicates(seg))
 
             T_at_pre_place = traj_T[-1] if traj_T else T_start
@@ -508,7 +509,7 @@ class MotionPlanner():
                 seg = self._interpolate_poses_linear(traj_T[-1], post_place, max_step=lift_max_step)
                 _append(traj_T, self._prune_duplicates(seg))
 
-            _append(traj_T, self._interpolate_poses_linear(traj_T[-1], T_cur))
+            _append(traj_T, self._interpolate_poses_linear(traj_T[-1], T_cur, max_step=max_step))
 
             return traj_T, events, key_poses
 
