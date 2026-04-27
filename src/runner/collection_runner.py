@@ -770,7 +770,9 @@ class CollectionRunner:
                     if task.pick_tag_id is not None:
                         T = detect_single_tag_world_pose(mp.cameras[0], task.pick_tag_id)
                         info[f"{cs.get('pick', 'pick')} cup (pick)"] = "detected" if T is not None else "not detected"
-                    if task.place_tag_id is not None:
+                    # Skip place detection when using cached position (unstack mode):
+                    # place_tag_id points to the pick cup's tag, not the place target.
+                    if task.place_tag_id is not None and task.place_xy_offset is None:
                         T = detect_single_tag_world_pose(mp.cameras[0], task.place_tag_id)
                         info[f"{cs.get('place', 'place')} cup (place)"] = "detected" if T is not None else "not detected"
                     return info
