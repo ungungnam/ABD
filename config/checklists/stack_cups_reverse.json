@@ -57,18 +57,18 @@
       "success_item": true,
       "success_answer": "no",
       "reset_group": 1
+    },
+    {
+      "id": 11,
+      "question": "Based on the object detection status provided, is the pick cup successfully detected by the robot's perception system?",
+      "weight": 0.5
     }
   ],
   "next_task": [
     {
-      "id": 11,
+      "id": 12,
       "question": "Are stacked cups on stable surfaces suitable for stacking?",
       "weight": 0.1
-    },
-    {
-      "id": 12,
-      "question": "Based on the object detection status provided, is the pick cup successfully detected by the robot's perception system?",
-      "weight": 0.5
     }
   ]
 }

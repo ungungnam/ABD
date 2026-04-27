@@ -47,36 +47,35 @@
       "question": "Is the drawer closed so that none of their interiors are visible?",
       "weight": 0.3,
       "success_item": true
-    }
-  ],
-  "next_task": [
-    {
+    },{
       "id": 10,
-      "question": "Is the drawer and handle stable enough to withstand pushing interaction?",
-      "weight": 0.1
-    },
-    {
-      "id": 12,
-      "question": "Is the area in front of the drawer free of objects that obstruct drawer closing?",
-      "weight": 0.2
-    },
-    {
-      "id": 13,
-      "question": "Is there sufficient clearance for the drawer to close fully?",
-      "weight": 0.2
-    },
-    {
-      "id": 14,
       "question": "Based on the object detection status provided, is the drawer's AprilTag successfully detected by the robot's perception system?",
       "weight": 0.5
     },
     {
-      "id": 15,
+      "id": 11,
       "question": "Based on the object detection status provided, is the drawer rotation angle less than 15 degrees from front-facing?",
       "weight": 0.5
+    }
+  ],
+  "next_task": [
+    {
+      "id": 12,
+      "question": "Is the drawer and handle stable enough to withstand pushing interaction?",
+      "weight": 0.1
     },
     {
-      "id": 16,
+      "id": 13,
+      "question": "Is the area in front of the drawer free of objects that obstruct drawer closing?",
+      "weight": 0.2
+    },
+    {
+      "id": 14,
+      "question": "Is there sufficient clearance for the drawer to close fully?",
+      "weight": 0.2
+    },
+    {
+      "id": 15,
       "question": "Are all drawers still properly inserted in the cabinet, with none pulled out so far that they cannot be normally closed?",
       "weight": 0.5
     }

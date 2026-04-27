@@ -27,7 +27,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from policy.base_policy import BaseResetPolicy
 from policy.checklist_prompts import META_PROMPT, EVAL_PROMPT
@@ -73,15 +73,11 @@ class VLMChecklistPolicy(BaseResetPolicy):
         vqa_client: VQAClient,
         checklist_dir: str,
         tau_reset: float = 0.9,
-        run_detection: Optional[Callable[[str], dict]] = None,
     ):
         self.vqa_client = vqa_client
         self.checklist_dir = Path(checklist_dir)
         self.checklist_dir.mkdir(parents=True, exist_ok=True)
         self.tau_reset = tau_reset
-        # callable(canonical_checklist_name) -> {obj: 'detected'|'not detected'}
-        # Called in Phase 2 to get detection info for the next task's objects.
-        self.run_detection = run_detection
         self._checklists: dict = {}  # canonical_name -> loaded checklist dict
         self.last_eval: Optional[dict] = None
         self.last_success: Optional[bool] = None  # set by needs_reset(); None if no current_task items
@@ -123,7 +119,7 @@ class VLMChecklistPolicy(BaseResetPolicy):
         )
         for item in per_item:
             marker = "★" if item.get("success_item") else " "
-            phase = f"[{item.get('phase', 'p1')}]"
+            phase = f"[{item.get('phase', 'current')}]"
             log.info(
                 f"  {marker}{phase}[{item['answer'].upper():3s}] (w={item['weight']:.2f}) {item['question']}"
             )
@@ -280,29 +276,11 @@ class VLMChecklistPolicy(BaseResetPolicy):
         if p2_checklist:
             items_p2 = p2_checklist.get("next_task", [])
             if items_p2:
-                phase_label = f"paired:{next_name}" if success else f"retry:{next_name}"
-                # Run detection for the next task's objects so that detection-based
-                # questions in next_task can be answered with accurate status.
-                p2_detection_block = ""
-                if self.run_detection is not None:
-                    try:
-                        p2_det = self.run_detection(next_name)
-                        if p2_det:
-                            det_lines = " / ".join(
-                                f"{obj}: {status}" for obj, status in p2_det.items()
-                            )
-                            p2_detection_block = f"\nObject detection status: {det_lines}\n"
-                            log.info(
-                                f"[VLMChecklistPolicy] Phase 2 ({phase_label}) detection: {det_lines}"
-                            )
-                    except Exception as e:
-                        log.warning(
-                            f"[VLMChecklistPolicy] Phase 2 detection error for '{next_name}': {e}"
-                        )
                 log.info(
-                    f"[VLMChecklistPolicy] Phase 2 ({phase_label}) | {len(items_p2)} items"
+                    f"[VLMChecklistPolicy] Phase 2 (next={'paired:' + next_name if success else 'retry:' + next_name})"
+                    f" | {len(items_p2)} items"
                 )
-                answers_p2 = self._ask_vlm(items_p2, preamble, p2_detection_block, obs, task)
+                answers_p2 = self._ask_vlm(items_p2, preamble, detection_block, obs, task)
 
         # ---- Score ---- #
         score, per_item = self._compute_score(items_p1, answers_p1, items_p2, answers_p2)
@@ -346,7 +324,7 @@ class VLMChecklistPolicy(BaseResetPolicy):
         weight_total = 0.0
         per_item: List[dict] = []
 
-        for phase_tag, items, answers in [("p1", items_p1, answers_p1), ("p2", items_p2, answers_p2)]:
+        for phase_tag, items, answers in [("current", items_p1, answers_p1), ("next", items_p2, answers_p2)]:
             for item in items:
                 ans = answers.get(str(item["id"]), "no")
                 yes = ans == "yes"

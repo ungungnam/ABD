@@ -55,7 +55,6 @@ def build_env(config: DictConfig) -> ABDBaseEnv:
 def build_policy(
     config: DictConfig,
     vqa_client: VQAClient = None,
-    run_detection=None,
 ) -> BaseResetPolicy:
     """Build the reset policy from config."""
     method = config.policy.method
@@ -76,7 +75,6 @@ def build_policy(
             vqa_client=vqa_client,
             checklist_dir=config.policy.checklist_dir,
             tau_reset=config.policy.tau_reset,
-            run_detection=run_detection,
         )
     else:
         raise ValueError(f"Unknown policy method: {method}")
@@ -131,8 +129,7 @@ class CollectionRunner:
             self._init_real(config)
 
         # Policy
-        detect_fn = self._make_detection_fn() if not self.is_dummy else None
-        self.policy = build_policy(config, vqa_client=self.vqa_client, run_detection=detect_fn)
+        self.policy = build_policy(config, vqa_client=self.vqa_client)
 
         # Metrics
         self.metrics = MetricsLogger(
@@ -710,78 +707,6 @@ class CollectionRunner:
         except Exception:
             n = 1
         return f"{today}_{n}"
-
-    def _make_detection_fn(self):
-        """Return a callable(canonical_checklist_name) -> detection_info dict.
-
-        Used by VLMChecklistPolicy for Phase 2 (next task) detection.
-        - pick_place: re-runs perception agent for the next task's pick/place objects.
-        - open_drawer / close_drawer: AprilTag detection + rotation measurement.
-        - stack_cups: AprilTag detection for pick (and place if available).
-        """
-        generator = self.generator
-        env = self.env
-
-        def _canonical(t) -> str:
-            if t.task_type == "stack_cups":
-                return "stack_cups_forward" if t.stack_step.startswith("forward") else "stack_cups_reverse"
-            return t.name
-
-        task_map = {_canonical(t): t for t in self.task_scheduler._tasks}
-
-        def _detect(checklist_name: str) -> dict:
-            task = task_map.get(checklist_name)
-            if task is None:
-                return {}
-            try:
-                if task.task_type == "pick_place":
-                    state = task.canonical_state or {}
-                    pick_obj = state.get("object")
-                    place_obj = state.get("target")
-                    if not pick_obj or not place_obj:
-                        return {}
-                    pick_p = generator._query_perception_with_retry(env, pick_obj)
-                    place_p = generator._query_perception_with_retry(env, place_obj)
-                    return {
-                        f"{pick_obj} (pick)": "detected" if pick_p["responses_result_is_valid"] else "not detected",
-                        f"{place_obj} (place)": "detected" if place_p["responses_result_is_valid"] else "not detected",
-                    }
-
-                elif task.task_type == "open_drawer":
-                    from utils.camera_utils import detect_single_tag_world_pose
-                    mp = generator.motion_planner
-                    T = detect_single_tag_world_pose(mp.cameras[0], task.pick_tag_id)
-                    info = {"drawer": "detected" if T is not None else "not detected"}
-                    if T is not None:
-                        rot = mp.measure_drawer_rotation(task.pick_tag_id)
-                        if rot is not None:
-                            if abs(rot) < 0.5:
-                                info["drawer rotation"] = "0.0 degrees (front-facing)"
-                            else:
-                                direction = "left" if rot > 0 else "right"
-                                info["drawer rotation"] = f"{abs(rot):.1f} degrees {direction}"
-                    return info
-
-                elif task.task_type == "stack_cups":
-                    from utils.camera_utils import detect_single_tag_world_pose
-                    mp = generator.motion_planner
-                    cs = task.canonical_state or {}
-                    info = {}
-                    if task.pick_tag_id is not None:
-                        T = detect_single_tag_world_pose(mp.cameras[0], task.pick_tag_id)
-                        info[f"{cs.get('pick', 'pick')} cup (pick)"] = "detected" if T is not None else "not detected"
-                    # Skip place detection when using cached position (unstack mode):
-                    # place_tag_id points to the pick cup's tag, not the place target.
-                    if task.place_tag_id is not None and task.place_xy_offset is None:
-                        T = detect_single_tag_world_pose(mp.cameras[0], task.place_tag_id)
-                        info[f"{cs.get('place', 'place')} cup (place)"] = "detected" if T is not None else "not detected"
-                    return info
-
-            except Exception as e:
-                log.warning(f"[CollectionRunner] Phase 2 detection error for '{checklist_name}': {e}")
-            return {}
-
-        return _detect
 
     @staticmethod
     def _build_detection_info(task, gen_result) -> dict:

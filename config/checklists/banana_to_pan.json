@@ -32,43 +32,43 @@
       "question": "Is the banana currently placed inside the pan?",
       "weight": 0.3,
       "success_item": true
-    }
-  ],
-  "next_task": [
+    },
     {
       "id": 7,
-      "question": "Are the banana and pan in a safe and non-hazardous state?",
-      "weight": 0.3
-    },
-    {
-      "id": 8,
-      "question": "Is the pan clearly visible to the robot?",
-      "weight": 0.3
-    },
-    {
-      "id": 9,
-      "question": "Is the interior of the pan accessible to the robot without obstruction?",
-      "weight": 0.2
-    },
-    {
-      "id": 10,
-      "question": "Is there sufficient free space above and around the pan to place the banana?",
-      "weight": 0.2
-    },
-    {
-      "id": 11,
-      "question": "Is the pan resting stably and unlikely to tip during banana placement?",
-      "weight": 0.1
-    },
-    {
-      "id": 12,
       "question": "Based on the object detection status provided, is the banana successfully detected by the robot's perception system?",
       "weight": 0.5
     },
     {
-      "id": 13,
+      "id": 8,
       "question": "Based on the object detection status provided, is the pan successfully detected by the robot's perception system?",
       "weight": 0.5
+    }
+  ],
+  "next_task": [
+    {
+      "id": 9,
+      "question": "Are the banana and pan in a safe and non-hazardous state?",
+      "weight": 0.3
+    },
+    {
+      "id": 10,
+      "question": "Is the pan clearly visible to the robot?",
+      "weight": 0.3
+    },
+    {
+      "id": 11,
+      "question": "Is the interior of the pan accessible to the robot without obstruction?",
+      "weight": 0.2
+    },
+    {
+      "id": 12,
+      "question": "Is there sufficient free space above and around the pan to place the banana?",
+      "weight": 0.2
+    },
+    {
+      "id": 13,
+      "question": "Is the pan resting stably and unlikely to tip during banana placement?",
+      "weight": 0.1
     }
   ]
 }

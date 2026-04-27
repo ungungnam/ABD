@@ -57,23 +57,23 @@
       "success_item": true,
       "success_answer": "yes",
       "reset_group": 1
-    }
-  ],
-  "next_task": [
-    {
-      "id": 11,
-      "question": "Are all three cups (purple, pink and blue) on stable surfaces suitable for stacking?",
-      "weight": 0.1
     },
     {
-      "id": 12,
+      "id": 11,
       "question": "Based on the object detection status provided, is the pick cup successfully detected by the robot's perception system?",
       "weight": 0.5
     },
     {
-      "id": 13,
+      "id": 12,
       "question": "Based on the object detection status provided, is the place cup successfully detected by the robot's perception system?",
       "weight": 0.5
+    }
+  ],
+  "next_task": [
+    {
+      "id": 13,
+      "question": "Are all three cups (purple, pink and blue) on stable surfaces suitable for stacking?",
+      "weight": 0.1
     }
   ]
 }
