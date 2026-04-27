@@ -96,18 +96,19 @@ class MotionPlanner():
         return partial_trajectory, partial_events, key_poses
 
     def plan_pick_place(self, pick_perception, place_perception, vlm_action=None):
-        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.06)
-        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.06)
+        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.05)
+        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.05)
         if pick_grasp_pose and place_grasp_pose:
             trajectory, events, key_poses = self.generate_trajectory(
                 vlm_action=vlm_action,
                 pick_grasp_pose=pick_grasp_pose,
                 place_grasp_pose=place_grasp_pose,
                 post_lift=True,
-                post_lift_height=0.06,
+                post_lift_height=0.05,
                 descent_max_step=0.015,
                 lift_max_step=0.03,
                 max_step=0.03,
+                ext_len=6,
             )
         else:
             trajectory, events, key_poses = self.generate_trajectory(vlm_action=vlm_action)
@@ -460,7 +461,7 @@ class MotionPlanner():
                 post_pick[:3, 3] = T_pick[:3, 3] + np.array([0.0, 0.0, post_lift_height])
                 post_place = T_place.copy()
                 post_place[:3, 3] = T_place[:3, 3] + np.array([0.0, 0.0, post_lift_height])
-                key_poses = [pre_pick, T_pick, post_pick, pre_place, T_place, post_place]
+                key_poses = [T_pick, T_place]
 
             # 1) cur -> vlm(pick)
             if vlm_action is not None:
@@ -994,12 +995,21 @@ class MotionPlanner():
             object_points = None
 
         if object_points is not None:
+            z = object_points[:, 2]
+            z_mean, z_std = float(z.mean()), float(z.std())
+            object_points = object_points[np.abs(z - z_mean) < 1.5 * z_std]
+            z = object_points[:, 2]
+            log.info(
+                f"[Perception Z] n={len(z)} min={z.min():.4f} p10={np.percentile(z,10):.4f} "
+                f"p25={np.percentile(z,25):.4f} mean={z.mean():.4f} "
+                f"p75={np.percentile(z,75):.4f} max={z.max():.4f}"
+            )
             obb = fit_obb_pca(object_points)
             grasp_poses = generate_grasps_from_obb(obb, rotation=self.current_pose()[:3, :3])
             best_grasp_pose = self.sample_best_grasp(grasp_poses)
             forced_R = np.array([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]])
             best_grasp_pose['T_wg'][:3, :3] = forced_R
-            # best_grasp_pose['T_wg'][2, 3] += 0.005   # shift 0.5 cm up in Z
+            best_grasp_pose['T_wg'][2, 3] = float(np.percentile(object_points[:, 2], 30))
             best_grasp_pose['pre_T_wg'][:3, :3] = forced_R
             best_grasp_pose['pre_T_wg'][:3, 3] = (
                 best_grasp_pose['T_wg'][:3, 3] + np.array([0.0, 0.0, hover_offset])
