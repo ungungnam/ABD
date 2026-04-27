@@ -461,7 +461,7 @@ class MotionPlanner():
                 post_pick[:3, 3] = T_pick[:3, 3] + np.array([0.0, 0.0, post_lift_height])
                 post_place = T_place.copy()
                 post_place[:3, 3] = T_place[:3, 3] + np.array([0.0, 0.0, post_lift_height])
-                key_poses = [T_pick, T_place]
+                key_poses = [T_pick]
 
             # 1) cur -> vlm(pick)
             if vlm_action is not None:

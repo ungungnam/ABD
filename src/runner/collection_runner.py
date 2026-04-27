@@ -352,7 +352,7 @@ class CollectionRunner:
                     exec_result = self.executor.execute(
                         gen_result.trajectory, gen_result.events, task.language_task,
                         key_poses=gen_result.key_poses,
-                        use_ik_fallback=(task.task_type != "pick_place"),
+                        use_ik_fallback=True,
                     )
 
                 # Module C: Validate task success
