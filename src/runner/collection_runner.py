@@ -130,6 +130,10 @@ class CollectionRunner:
 
         # Policy
         self.policy = build_policy(config, vqa_client=self.vqa_client)
+        # Saved detection_info from the non-terminal reverse step (rev1 = pink unstack).
+        # Used at the terminal reverse step so purple detection failure caused by a failed
+        # pink unstack doesn't trigger a false reset.
+        self._stack_cups_prev_detection: dict = {}
 
         # Metrics
         self.metrics = MetricsLogger(
@@ -360,6 +364,10 @@ class CollectionRunner:
                 # without validation — UNLESS execution was skipped due to tag detection
                 # failure (skip_execution=True), in which case always run VLM validation.
                 if task.task_type == "stack_cups" and not self.task_scheduler.is_terminal_step and not skip_execution:
+                    # Save reverse-step detection so the terminal step can use it instead
+                    # of the purple-cup detection (which may fail if pink unstack failed).
+                    if not self.is_dummy and task.stack_step.startswith("reverse"):
+                        self._stack_cups_prev_detection = self._build_detection_info(task, gen_result)
                     validation = ValidationResult(
                         success=True, confidence=1.0, method="auto_advance", details={}
                     )
@@ -386,6 +394,15 @@ class CollectionRunner:
                             gen_result.metadata["drawer_rotation_deg"] = round(rot, 1)
 
                     detection_info = self._build_detection_info(task, gen_result)
+                    # For the terminal reverse step: substitute the purple-cup detection
+                    # with the pink-cup detection saved from the non-terminal reverse step.
+                    # Purple detection can fail simply because pink unstack failed (pink
+                    # still sits on purple), which should not trigger a reset on its own.
+                    if (task.task_type == "stack_cups"
+                            and task.stack_step.startswith("reverse")
+                            and self._stack_cups_prev_detection):
+                        detection_info = self._stack_cups_prev_detection
+                        self._stack_cups_prev_detection = {}
 
                     # VLMChecklistPolicy: checklist handles both success detection and
                     # reset decision via success_item-flagged questions.

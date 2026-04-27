@@ -69,16 +69,6 @@
       "id": 13,
       "question": "Is the handle in a state that allows grasping (not broken or missing)?",
       "weight": 0.2
-    },
-    {
-      "id": 14,
-      "question": "Is there sufficient space in front of the drawer to allow it to open fully?",
-      "weight": 0.2
-    },
-    {
-      "id": 15,
-      "question": "Is the area surrounding the drawer free from obstructions that would block opening?",
-      "weight": 0.2
     }
   ]
 }

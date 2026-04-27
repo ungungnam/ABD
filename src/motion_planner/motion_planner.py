@@ -816,9 +816,9 @@ class MotionPlanner():
         if action == "open":
             # Pick: grasp closed handle, shift 1 cm toward robot (-X)
             T_pick[:3, 3] = p_handle + np.array([-0.01, 0.0, 0.0])
-            # Place: pull -X; randomly add up to 3 cm extra
-            extra = np.random.uniform(0.0, 0.03)
-            T_place[:3, 3] = p_handle + np.array([-(self._DRAWER_PULL_DIST + extra), 0.0, 0.0])
+            # Place: pull -X by a random distance in [6 cm, 9 cm]
+            pull_dist = np.random.uniform(0.06, 0.09)
+            T_place[:3, 3] = p_handle + np.array([-pull_dist, 0.0, 0.0])
         else:
             # Pick: open handle position (closed handle - pull_dist), -1cm X buffer, -3cm Z
             T_pick[:3, 3] = p_handle + np.array([-self._DRAWER_PULL_DIST, 0.0, -0.03])

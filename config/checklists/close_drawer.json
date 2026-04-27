@@ -66,18 +66,9 @@
     },
     {
       "id": 13,
-      "question": "Is the area in front of the drawer free of objects that obstruct drawer closing?",
-      "weight": 0.2
-    },
-    {
-      "id": 14,
-      "question": "Is there sufficient clearance for the drawer to close fully?",
-      "weight": 0.2
-    },
-    {
-      "id": 15,
       "question": "Are all drawers still properly inserted in the cabinet, with none pulled out so far that they cannot be normally closed?",
       "weight": 0.5
     }
+    
   ]
 }
