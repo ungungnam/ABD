@@ -1,5 +1,5 @@
 {
-  "items": [
+  "common": [
     {
       "id": 1,
       "question": "Is the robot arm in a collision-free and safe position?",
@@ -39,7 +39,9 @@
       "id": 8,
       "question": "Are all the cups on stable surfaces suitable for placing?",
       "weight": 0.1
-    },
+    }
+  ],
+  "success_detection": [
     {
       "id": 9,
       "question": "Is the purple cup stacked on top of the blue cup?",
@@ -55,7 +57,9 @@
       "success_item": true,
       "success_answer": "no",
       "reset_group": 1
-    },
+    }
+  ],
+  "task_specific": [
     {
       "id": 11,
       "question": "Are none of the cups knocked over or lying on their side?",

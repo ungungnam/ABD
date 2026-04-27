@@ -1,11 +1,11 @@
 {
-  "items": [
+  "common": [
     {
       "id": 1,
       "question": "Is the robot in a safe, collision-free configuration?",
       "weight": 0.4
     },
-    { 
+    {
       "id": 2,
       "question": "Is the gripper or end-effector intact and functioning properly?",
       "weight": 0.4
@@ -49,22 +49,26 @@
       "id": 10,
       "question": "Is the pan resting stably and unlikely to tip during banana placement?",
       "weight": 0.1
-    },
+    }
+  ],
+  "success_detection": [
     {
       "id": 11,
+      "question": "Is the banana currently placed inside the pan?",
+      "weight": 0.3,
+      "success_item": true
+    }
+  ],
+  "task_specific": [
+    {
+      "id": 12,
       "question": "Based on the object detection status provided, is the banana successfully detected by the robot's perception system?",
       "weight": 0.5
     },
     {
-      "id": 12,
+      "id": 13,
       "question": "Based on the object detection status provided, is the pan successfully detected by the robot's perception system?",
       "weight": 0.5
-    },
-    {
-      "id": 13,
-      "question": "Is the banana currently placed inside the pan?",
-      "weight": 0.3,
-      "success_item": true
     }
   ]
 }

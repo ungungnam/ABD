@@ -1,12 +1,21 @@
 """VLM checklist reset policy.
 
-Generates a yes/no checklist (with weights) for each task by prompting a VLM
-once, then evaluates the checklist against post-execution observations to
-decide whether the environment needs a human reset.
+Each task checklist has three sections:
+  - common:            environment/safety items always evaluated
+  - success_detection: items that determine whether the task succeeded
+  - task_specific:     items specific to starting this task (used as phase 2
+                       of the PAIRED task's evaluation)
 
+Evaluation is two-phase:
+  Phase 1 — always runs:
+      Evaluate common + success_detection from the current task's checklist.
+      Determine success from all success_detection answers.
+  Phase 2 — runs only when Phase 1 reports success:
+      Evaluate task_specific from the PAIRED next task's checklist to verify
+      the environment is ready for that task.
+
+    score = Σ(weight_i × yes_i) / Σ(weight_i)  over all evaluated items
     needs_reset = (score < tau_reset)
-
-where score = Σ(weight_i × yes_i) / Σ(weight_i).
 
 Per-task checklists are persisted to ``config/checklists/<task_name>.json``
 so users can hand-edit weights and question wording between runs.
@@ -35,6 +44,18 @@ _CHECKLIST_PREAMBLE_DRAWER = (
     "If one view is ambiguous because of occlusion or perspective, rely more on the clearer view."
 )
 
+# Maps each canonical checklist name to the paired next task's checklist name.
+# After task A succeeds, task_specific items from _PAIRED[A] are evaluated to
+# verify the environment is ready for the next task.
+_PAIRED_CHECKLIST: dict = {
+    "banana_to_pan":       "banana_to_plate",
+    "banana_to_plate":     "banana_to_pan",
+    "open_drawer":         "close_drawer",
+    "close_drawer":        "open_drawer",
+    "stack_cups_forward":  "stack_cups_reverse",
+    "stack_cups_reverse":  "stack_cups_forward",
+}
+
 log = logging.getLogger(__name__)
 
 
@@ -55,9 +76,9 @@ class VLMChecklistPolicy(BaseResetPolicy):
         self.checklist_dir = Path(checklist_dir)
         self.checklist_dir.mkdir(parents=True, exist_ok=True)
         self.tau_reset = tau_reset
-        self._checklists: dict = {}  # task_name -> loaded checklist dict
+        self._checklists: dict = {}  # canonical_name -> loaded checklist dict
         self.last_eval: Optional[dict] = None
-        self.last_success: Optional[bool] = None  # set by needs_reset(); None if no success_item defined
+        self.last_success: Optional[bool] = None  # set by needs_reset(); None if no success_detection items
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -86,7 +107,7 @@ class VLMChecklistPolicy(BaseResetPolicy):
             "score": score,
             "items": per_item,
         }
-        self.last_success = success  # None when no success_item defined in checklist
+        self.last_success = success
 
         reset = score < self.tau_reset
 
@@ -96,26 +117,22 @@ class VLMChecklistPolicy(BaseResetPolicy):
         )
         for item in per_item:
             marker = "★" if item.get("success_item") else " "
-            log.info(f"  {marker}[{item['answer'].upper():3s}] (w={item['weight']:.2f}) {item['question']}")
+            phase = f"[{item.get('phase', 'p1')}]"
+            log.info(
+                f"  {marker}{phase}[{item['answer'].upper():3s}] (w={item['weight']:.2f}) {item['question']}"
+            )
 
         return reset
 
     # ------------------------------------------------------------------ #
-    # Checklist generation / loading
+    # Checklist loading
     # ------------------------------------------------------------------ #
 
     def _checklist_path(self, task_name: str) -> Path:
         return self.checklist_dir / f"{task_name}.json"
 
     def _canonical_checklist_name(self, task) -> str:
-        """Return the canonical checklist file stem for this task.
-
-        stack_cups steps share two checklists regardless of their individual
-        task.name (which varies by cup colour):
-          forward steps (stack_step starts with "forward") → stack_cups_forward
-          reverse steps (stack_step starts with "reverse") → stack_cups_reverse
-        All other tasks use task.name directly.
-        """
+        """Return the canonical checklist file stem for this task."""
         if task.task_type == "stack_cups":
             is_forward = task.stack_step.startswith("forward")
             return "stack_cups_forward" if is_forward else "stack_cups_reverse"
@@ -123,7 +140,6 @@ class VLMChecklistPolicy(BaseResetPolicy):
 
     def _load_or_generate(self, task) -> dict:
         name = self._canonical_checklist_name(task)
-
         if name in self._checklists:
             return self._checklists[name]
 
@@ -146,12 +162,28 @@ class VLMChecklistPolicy(BaseResetPolicy):
         self._checklists[name] = checklist
         return checklist
 
+    def _load_by_name(self, name: str) -> Optional[dict]:
+        """Load checklist by canonical name without VLM generation."""
+        if name in self._checklists:
+            return self._checklists[name]
+        path = self._checklist_path(name)
+        if not path.exists():
+            log.warning(
+                f"[VLMChecklistPolicy] Paired checklist '{name}' not found at {path}; "
+                f"skipping phase 2."
+            )
+            return None
+        with open(path) as f:
+            checklist = json.load(f)
+        self._validate_checklist_schema(checklist, name)
+        self._checklists[name] = checklist
+        return checklist
+
     def _generate_checklist(self, task) -> dict:
         prompt = META_PROMPT.format(
             task_name=task.name,
             task_description=task.language_task,
         )
-        # Text-only generation: no images needed at this stage.
         raw = self.vqa_client.ask_text(None, prompt)
         if not raw:
             raise RuntimeError(
@@ -168,18 +200,18 @@ class VLMChecklistPolicy(BaseResetPolicy):
 
     @staticmethod
     def _validate_checklist_schema(checklist: dict, task_name: str) -> None:
-        if "items" not in checklist or not isinstance(checklist["items"], list):
-            raise ValueError(
-                f"Checklist for '{task_name}' missing 'items' list."
-            )
-        if not checklist["items"]:
-            raise ValueError(f"Checklist for '{task_name}' has no items.")
-        for i, item in enumerate(checklist["items"]):
-            for key in ("id", "question", "weight"):
-                if key not in item:
-                    raise ValueError(
-                        f"Checklist '{task_name}' item {i} missing '{key}'."
-                    )
+        for section in ("common", "success_detection", "task_specific"):
+            if section not in checklist or not isinstance(checklist[section], list):
+                raise ValueError(
+                    f"Checklist '{task_name}' missing '{section}' list."
+                )
+        for section in ("common", "success_detection", "task_specific"):
+            for i, item in enumerate(checklist[section]):
+                for key in ("id", "question", "weight"):
+                    if key not in item:
+                        raise ValueError(
+                            f"Checklist '{task_name}' {section}[{i}] missing '{key}'."
+                        )
 
     # ------------------------------------------------------------------ #
     # Checklist evaluation
@@ -188,20 +220,12 @@ class VLMChecklistPolicy(BaseResetPolicy):
     def _evaluate(
         self, checklist: dict, task, observation: dict, detection_info: dict = None
     ) -> Tuple[float, List[dict], Optional[bool]]:
-        """Evaluate checklist against observation.
+        """Two-phase checklist evaluation.
 
-        Returns:
-            score:          weighted reset score
-            per_item:       per-item details
-            success:        True/False from success_item answers; None if none defined
-            reset_override: True  → mixed group answers → force reset
-                            False → all-wrong group answers → force retry (no reset)
-                            None  → no group constraint, use score threshold
+        Phase 1: common + success_detection from current task.
+        Phase 2 (only when success): task_specific from the paired next task.
+        Returns (score, per_item, success).
         """
-        items = checklist["items"]
-        items_block = "\n".join(
-            f"{item['id']}. {item['question']}" for item in items
-        )
         if task.task_type == "open_drawer":
             preamble = _CHECKLIST_PREAMBLE_DRAWER
             obs = {k: v for k, v in observation.items() if "front" not in k}
@@ -215,69 +239,109 @@ class VLMChecklistPolicy(BaseResetPolicy):
                 f"{obj}: {status}" for obj, status in detection_info.items()
             )
             detection_block = f"\nObject detection status: {det_lines}\n"
+            log.info(f"[VLMChecklistPolicy] task={task.name} | detection:{detection_block.strip()}")
 
+        # ---- Phase 1: common + success_detection ---- #
+        items_p1 = checklist["common"] + checklist["success_detection"]
+        answers_p1 = self._ask_vlm(items_p1, preamble, detection_block, obs, task)
+
+        success_answers = [
+            answers_p1.get(str(item["id"]), "no") == item.get("success_answer", "yes")
+            for item in checklist["success_detection"]
+        ]
+        success = all(success_answers) if success_answers else None
+
+        # ---- Phase 2: task_specific from paired task (only on success) ---- #
+        items_p2: List[dict] = []
+        answers_p2: dict = {}
+        if success:
+            paired_name = _PAIRED_CHECKLIST.get(self._canonical_checklist_name(task))
+            if paired_name:
+                paired_checklist = self._load_by_name(paired_name)
+                if paired_checklist:
+                    items_p2 = paired_checklist.get("task_specific", [])
+                    if items_p2:
+                        log.info(
+                            f"[VLMChecklistPolicy] Phase 2: evaluating task_specific "
+                            f"from '{paired_name}' ({len(items_p2)} items)"
+                        )
+                        answers_p2 = self._ask_vlm(
+                            items_p2, preamble, detection_block, obs, task
+                        )
+
+        # ---- Score ---- #
+        score, per_item = self._compute_score(items_p1, answers_p1, items_p2, answers_p2)
+        return score, per_item, success
+
+    def _ask_vlm(
+        self,
+        items: List[dict],
+        preamble: str,
+        detection_block: str,
+        obs: dict,
+        task,
+    ) -> dict:
+        items_block = "\n".join(
+            f"{item['id']}. {item['question']}" for item in items
+        )
         prompt = preamble + detection_block + "\n" + EVAL_PROMPT.format(
             task_description=task.language_task,
             items_block=items_block,
         )
-        if detection_block:
-            log.info(f"[VLMChecklistPolicy] task={task.name} | detection:{detection_block.strip()}")
         raw = self.vqa_client.ask_text(obs, prompt)
+        return self._parse_answers(raw, items)
 
-        answers = self._parse_answers(raw, items)
-
-        # Determine which reset_groups have mixed (inconsistent) answers.
-        # Mixed group items score 0 to drive score below tau_reset.
+    @staticmethod
+    def _compute_score(
+        items_p1: List[dict],
+        answers_p1: dict,
+        items_p2: List[dict],
+        answers_p2: dict,
+    ) -> Tuple[float, List[dict]]:
+        # Detect mixed reset_groups (only within phase 1).
         group_answers: dict = {}
-        for item in items:
+        for item in items_p1:
             gid = item.get("reset_group")
             if gid is not None:
-                ans = answers.get(str(item["id"]), "no")
+                ans = answers_p1.get(str(item["id"]), "no")
                 group_answers.setdefault(gid, set()).add(ans)
         mixed_groups = {gid for gid, ans_set in group_answers.items() if len(ans_set) > 1}
 
-        per_item: List[dict] = []
         weighted_sum = 0.0
         weight_total = 0.0
-        success_answers: List[bool] = []
+        per_item: List[dict] = []
 
-        for item in items:
-            ans = answers.get(str(item["id"]), "no")
-            yes = ans == "yes"
-            w = float(item["weight"])
-            is_success_item = bool(item.get("success_item", False))
-            success_answer = item.get("success_answer", "yes")
+        for phase_tag, items, answers in [("p1", items_p1, answers_p1), ("p2", items_p2, answers_p2)]:
+            for item in items:
+                ans = answers.get(str(item["id"]), "no")
+                yes = ans == "yes"
+                w = float(item["weight"])
+                is_success_item = bool(item.get("success_item", False))
+                success_answer = item.get("success_answer", "yes")
 
-            if is_success_item:
-                success_answers.append(ans == success_answer)
+                in_mixed_group = item.get("reset_group") in mixed_groups
+                in_reset_group = item.get("reset_group") is not None
 
-            in_mixed_group = item.get("reset_group") in mixed_groups
-            in_reset_group = item.get("reset_group") is not None
-            if in_reset_group:
-                # Consistency check: consistent answers (all-yes or all-no) → 1
-                # Mixed answers → 0 (force reset via low score)
-                # Use abs(w) so negative-weight items still contribute positively
-                # when answers are consistent.
-                weighted_sum += abs(w) * (0.0 if in_mixed_group else 1.0)
-            else:
-                weighted_sum += w * (1.0 if yes else 0.0)
-            weight_total += abs(w)
+                if in_reset_group:
+                    weighted_sum += abs(w) * (0.0 if in_mixed_group else 1.0)
+                else:
+                    weighted_sum += w * (1.0 if yes else 0.0)
+                weight_total += abs(w)
 
-            per_item.append(
-                {
-                    "id": item["id"],
-                    "question": item["question"],
-                    "weight": item["weight"],
-                    "answer": ans,
-                    "success_item": is_success_item,
-                    "success_answer": success_answer,
-                }
-            )
+                per_item.append(
+                    {
+                        "id": item["id"],
+                        "question": item["question"],
+                        "weight": item["weight"],
+                        "answer": ans,
+                        "success_item": is_success_item,
+                        "success_answer": success_answer,
+                        "phase": phase_tag,
+                    }
+                )
 
         score = weighted_sum / weight_total if weight_total > 0 else 0.0
-        success = all(success_answers) if success_answers else None
-
-        return score, per_item, success
+        return score, per_item
 
     @staticmethod
     def _parse_answers(raw: str, items: List[dict]) -> dict:
