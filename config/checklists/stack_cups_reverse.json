@@ -22,7 +22,7 @@
     },
     {
       "id": 5,
-      "question": "Are all the cups clearly visible to the perception system?",
+      "question": "Are none of the cups knocked over or lying on their side?",
       "weight": 0.3
     },
     {
@@ -41,7 +41,7 @@
       "weight": 0.1
     }
   ],
-  "success_detection": [
+  "current_task": [
     {
       "id": 9,
       "question": "Is the purple cup stacked on top of the blue cup?",
@@ -59,11 +59,11 @@
       "reset_group": 1
     }
   ],
-  "task_specific": [
+  "next_task": [
     {
       "id": 11,
-      "question": "Are none of the cups knocked over or lying on their side?",
-      "weight": 0.4
+      "question": "Are stacked cups on stable surfaces suitable for stacking?",
+      "weight": 0.1
     },
     {
       "id": 12,

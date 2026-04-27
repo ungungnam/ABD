@@ -37,11 +37,11 @@
     },
     {
       "id": 8,
-      "question": "Are all three cups (purple, pink and blue) on stable surfaces suitable for stacking?",
+      "question": "Are all the cups on stable surfaces suitable for placing?",
       "weight": 0.1
     }
   ],
-  "success_detection": [
+  "current_task": [
     {
       "id": 9,
       "question": "Is the purple cup stacked on top of the blue cup?",
@@ -59,11 +59,11 @@
       "reset_group": 1
     }
   ],
-  "task_specific": [
+  "next_task": [
     {
       "id": 11,
-      "question": "Are none of the cups knocked over or lying on their side?",
-      "weight": 0.5
+      "question": "Are all three cups (purple, pink and blue) on stable surfaces suitable for stacking?",
+      "weight": 0.1
     },
     {
       "id": 12,

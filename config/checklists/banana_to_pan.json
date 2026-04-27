@@ -3,7 +3,7 @@
     {
       "id": 1,
       "question": "Is the robot in a safe, collision-free configuration?",
-      "weight": 0.4
+      "weight": 0.5
     },
     {
       "id": 2,
@@ -17,49 +17,49 @@
     },
     {
       "id": 4,
-      "question": "Are the banana and pan in a safe and non-hazardous state?",
-      "weight": 0.3
-    },
-    {
-      "id": 5,
       "question": "Is the banana clearly visible to the robot?",
       "weight": 0.3
     },
     {
-      "id": 6,
-      "question": "Is the pan clearly visible to the robot?",
-      "weight": 0.3
-    },
-    {
-      "id": 7,
+      "id": 5,
       "question": "Is the banana located within the robot's reachable workspace?",
       "weight": 0.3
-    },
-    {
-      "id": 8,
-      "question": "Is the interior of the pan accessible to the robot without obstruction?",
-      "weight": 0.2
-    },
-    {
-      "id": 9,
-      "question": "Is there sufficient free space above and around the pan to place the banana?",
-      "weight": 0.2
-    },
-    {
-      "id": 10,
-      "question": "Is the pan resting stably and unlikely to tip during banana placement?",
-      "weight": 0.1
     }
   ],
-  "success_detection": [
+  "current_task": [
     {
-      "id": 11,
+      "id": 6,
       "question": "Is the banana currently placed inside the pan?",
       "weight": 0.3,
       "success_item": true
     }
   ],
-  "task_specific": [
+  "next_task": [
+    {
+      "id": 7,
+      "question": "Are the banana and pan in a safe and non-hazardous state?",
+      "weight": 0.3
+    },
+    {
+      "id": 8,
+      "question": "Is the pan clearly visible to the robot?",
+      "weight": 0.3
+    },
+    {
+      "id": 9,
+      "question": "Is the interior of the pan accessible to the robot without obstruction?",
+      "weight": 0.2
+    },
+    {
+      "id": 10,
+      "question": "Is there sufficient free space above and around the pan to place the banana?",
+      "weight": 0.2
+    },
+    {
+      "id": 11,
+      "question": "Is the pan resting stably and unlikely to tip during banana placement?",
+      "weight": 0.1
+    },
     {
       "id": 12,
       "question": "Based on the object detection status provided, is the banana successfully detected by the robot's perception system?",

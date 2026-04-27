@@ -1,18 +1,20 @@
 """VLM checklist reset policy.
 
 Each task checklist has three sections:
-  - common:            environment/safety items always evaluated
-  - success_detection: items that determine whether the task succeeded
-  - task_specific:     items specific to starting this task (used as phase 2
-                       of the PAIRED task's evaluation)
+  - common:       environment/safety items always evaluated
+  - current_task: items that determine whether the current task succeeded
+  - next_task:    items that verify the environment is ready to START this task
+                  (used as phase 2 when this task will run next)
 
 Evaluation is two-phase:
   Phase 1 — always runs:
-      Evaluate common + success_detection from the current task's checklist.
-      Determine success from all success_detection answers.
-  Phase 2 — runs only when Phase 1 reports success:
-      Evaluate task_specific from the PAIRED next task's checklist to verify
-      the environment is ready for that task.
+      Evaluate common + current_task from the current task's checklist.
+      Determine success from all current_task answers.
+  Phase 2 — always runs, source depends on Phase 1 result:
+      success  → evaluate next_task from the PAIRED task's checklist
+                 (environment should be ready for the paired task)
+      failure  → evaluate next_task from the CURRENT task's checklist
+                 (environment should be ready to retry the same task)
 
     score = Σ(weight_i × yes_i) / Σ(weight_i)  over all evaluated items
     needs_reset = (score < tau_reset)
@@ -78,7 +80,7 @@ class VLMChecklistPolicy(BaseResetPolicy):
         self.tau_reset = tau_reset
         self._checklists: dict = {}  # canonical_name -> loaded checklist dict
         self.last_eval: Optional[dict] = None
-        self.last_success: Optional[bool] = None  # set by needs_reset(); None if no success_detection items
+        self.last_success: Optional[bool] = None  # set by needs_reset(); None if no current_task items
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -200,12 +202,12 @@ class VLMChecklistPolicy(BaseResetPolicy):
 
     @staticmethod
     def _validate_checklist_schema(checklist: dict, task_name: str) -> None:
-        for section in ("common", "success_detection", "task_specific"):
+        for section in ("common", "current_task", "next_task"):
             if section not in checklist or not isinstance(checklist[section], list):
                 raise ValueError(
                     f"Checklist '{task_name}' missing '{section}' list."
                 )
-        for section in ("common", "success_detection", "task_specific"):
+        for section in ("common", "current_task", "next_task"):
             for i, item in enumerate(checklist[section]):
                 for key in ("id", "question", "weight"):
                     if key not in item:
@@ -222,8 +224,11 @@ class VLMChecklistPolicy(BaseResetPolicy):
     ) -> Tuple[float, List[dict], Optional[bool]]:
         """Two-phase checklist evaluation.
 
-        Phase 1: common + success_detection from current task.
-        Phase 2 (only when success): task_specific from the paired next task.
+        Phase 1: common + current_task from current task's checklist.
+                 Determines success/failure of the current task.
+        Phase 2: next_task items — source depends on Phase 1 result:
+                 success → next_task from PAIRED task's checklist
+                 failure → next_task from CURRENT task's checklist (retry)
         Returns (score, per_item, success).
         """
         if task.task_type == "open_drawer":
@@ -241,33 +246,41 @@ class VLMChecklistPolicy(BaseResetPolicy):
             detection_block = f"\nObject detection status: {det_lines}\n"
             log.info(f"[VLMChecklistPolicy] task={task.name} | detection:{detection_block.strip()}")
 
-        # ---- Phase 1: common + success_detection ---- #
-        items_p1 = checklist["common"] + checklist["success_detection"]
+        # ---- Phase 1: common + current_task ---- #
+        items_p1 = checklist["common"] + checklist["current_task"]
         answers_p1 = self._ask_vlm(items_p1, preamble, detection_block, obs, task)
 
         success_answers = [
             answers_p1.get(str(item["id"]), "no") == item.get("success_answer", "yes")
-            for item in checklist["success_detection"]
+            for item in checklist["current_task"]
+            if item.get("success_item", False)
         ]
         success = all(success_answers) if success_answers else None
 
-        # ---- Phase 2: task_specific from paired task (only on success) ---- #
+        # ---- Phase 2: next_task ---- #
+        # success  → next_task from paired task's checklist
+        # failure  → next_task from current task's checklist (same task will retry)
+        current_name = self._canonical_checklist_name(task)
+        if success:
+            next_name = _PAIRED_CHECKLIST.get(current_name, current_name)
+        else:
+            next_name = current_name
+
+        if next_name == current_name:
+            p2_checklist = checklist
+        else:
+            p2_checklist = self._load_by_name(next_name)
+
         items_p2: List[dict] = []
         answers_p2: dict = {}
-        if success:
-            paired_name = _PAIRED_CHECKLIST.get(self._canonical_checklist_name(task))
-            if paired_name:
-                paired_checklist = self._load_by_name(paired_name)
-                if paired_checklist:
-                    items_p2 = paired_checklist.get("task_specific", [])
-                    if items_p2:
-                        log.info(
-                            f"[VLMChecklistPolicy] Phase 2: evaluating task_specific "
-                            f"from '{paired_name}' ({len(items_p2)} items)"
-                        )
-                        answers_p2 = self._ask_vlm(
-                            items_p2, preamble, detection_block, obs, task
-                        )
+        if p2_checklist:
+            items_p2 = p2_checklist.get("next_task", [])
+            if items_p2:
+                log.info(
+                    f"[VLMChecklistPolicy] Phase 2 (next={'paired:' + next_name if success else 'retry:' + next_name})"
+                    f" | {len(items_p2)} items"
+                )
+                answers_p2 = self._ask_vlm(items_p2, preamble, detection_block, obs, task)
 
         # ---- Score ---- #
         score, per_item = self._compute_score(items_p1, answers_p1, items_p2, answers_p2)

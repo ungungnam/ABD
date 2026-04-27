@@ -32,44 +32,39 @@
     },
     {
       "id": 7,
-      "question": "Is the drawer handle in a graspable orientation and unobstructed for gripping?",
-      "weight": 0.3
-    },
-    {
-      "id": 8,
-      "question": "Is the area in front of the drawer free of objects that obstruct drawer closing?",
-      "weight": 0.2
-    },
-    {
-      "id": 9,
-      "question": "Is there sufficient clearance for the drawer to close fully?",
-      "weight": 0.2
-    },
-    {
-      "id": 10,
       "question": "Is the drawer guide and track in good condition and free of major mechanical blockage?",
       "weight": 0.2
     },
     {
-      "id": 11,
-      "question": "Is the drawer and handle stable enough to withstand pushing interaction?",
+      "id": 8,
+      "question": "Is the drawer mounted stably and able to move freely along its intended path?",
       "weight": 0.1
-    },
-    {
-      "id": 12,
-      "question": "Are all drawers still properly inserted in the cabinet, with none pulled out so far that they cannot be normally closed?",
-      "weight": 0.6
     }
   ],
-  "success_detection": [
+  "current_task": [
     {
-      "id": 13,
+      "id": 9,
       "question": "Is the drawer closed so that none of their interiors are visible?",
       "weight": 0.3,
       "success_item": true
     }
   ],
-  "task_specific": [
+  "next_task": [
+    {
+      "id": 10,
+      "question": "Is the drawer and handle stable enough to withstand pushing interaction?",
+      "weight": 0.1
+    },
+    {
+      "id": 12,
+      "question": "Is the area in front of the drawer free of objects that obstruct drawer closing?",
+      "weight": 0.2
+    },
+    {
+      "id": 13,
+      "question": "Is there sufficient clearance for the drawer to close fully?",
+      "weight": 0.2
+    },
     {
       "id": 14,
       "question": "Based on the object detection status provided, is the drawer's AprilTag successfully detected by the robot's perception system?",
@@ -82,8 +77,8 @@
     },
     {
       "id": 16,
-      "question": "Is the drawer open far enough that the interior of the drawer is clearly visible?",
-      "weight": 0.3
+      "question": "Are all drawers still properly inserted in the cabinet, with none pulled out so far that they cannot be normally closed?",
+      "weight": 0.5
     }
   ]
 }

@@ -7,7 +7,7 @@
     },
     {
       "id": 2,
-      "question": "Is the robot’s gripper or end-effector intact and operational?",
+      "question": "Is the robot\u2019s gripper or end-effector intact and operational?",
       "weight": 0.4
     },
     {
@@ -17,12 +17,12 @@
     },
     {
       "id": 4,
-      "question": "Is the scene free of unexpected hazards or obstacles?",
+      "question": "Is the drawer and its surroundings free of any hazards or obstructions that could cause harm?",
       "weight": 0.3
     },
     {
       "id": 5,
-      "question": "Is the drawer handle clearly visible to the robot's sensors?",
+      "question": "Is the drawer handle clearly visible?",
       "weight": 0.3
     },
     {
@@ -32,56 +32,51 @@
     },
     {
       "id": 7,
-      "question": "Is the drawer handle unobstructed and accessible to the gripper?",
+      "question": "Is the drawer guide and track in good condition and free of major mechanical blockage?",
       "weight": 0.2
     },
     {
       "id": 8,
-      "question": "Is the handle in a state that allows grasping (not broken or missing)?",
-      "weight": 0.2
-    },
-    {
-      "id": 9,
-      "question": "Is there sufficient space in front of the drawer to allow it to open fully?",
-      "weight": 0.2
-    },
-    {
-      "id": 10,
-      "question": "Is the area surrounding the drawer free from obstructions that would block opening?",
-      "weight": 0.2
-    },
-    {
-      "id": 11,
       "question": "Is the drawer mounted stably and able to move freely along its intended path?",
       "weight": 0.1
-    },
-    {
-      "id": 12,
-      "question": "Has the drawer not been pulled out so far that it cannot be pushed back in?",
-      "weight": 0.5
-    },
-    {
-      "id": 16,
-      "question": "Are all drawers still properly inserted in the cabinet, with none pulled out so far that they cannot be normally closed?",
-      "weight": 0.6
     }
   ],
-  "success_detection": [
+  "current_task": [
     {
-      "id": 15,
+      "id": 9,
       "question": "Is the drawer open far enough that the interior of the drawer is clearly visible?",
       "weight": 0.3,
       "success_item": true
     }
   ],
-  "task_specific": [
+  "next_task": [
+    {
+      "id": 10,
+      "question": "Is the drawer handle unobstructed and accessible to the gripper?",
+      "weight": 0.2
+    },
+    {
+      "id": 11,
+      "question": "Is the handle in a state that allows grasping (not broken or missing)?",
+      "weight": 0.2
+    },
+    {
+      "id": 12,
+      "question": "Is there sufficient space in front of the drawer to allow it to open fully?",
+      "weight": 0.2
+    },
     {
       "id": 13,
+      "question": "Is the area surrounding the drawer free from obstructions that would block opening?",
+      "weight": 0.2
+    },
+    {
+      "id": 14,
       "question": "Based on the object detection status provided, is the drawer's AprilTag successfully detected by the robot's perception system?",
       "weight": 0.5
     },
     {
-      "id": 14,
+      "id": 15,
       "question": "Based on the object detection status provided, is the drawer rotation angle less than 15 degrees from front-facing?",
       "weight": 0.5
     }
