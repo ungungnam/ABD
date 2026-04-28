@@ -14,6 +14,7 @@ class TaskDefinition:
     pick_tag_id: Optional[int] = None      # AprilTag ID on the cup to pick
     place_tag_id: Optional[int] = None     # AprilTag ID on the target cup / reference cup
     place_xy_offset: Optional[list] = None # non-None → unstack mode (use cached position)
+    place_offset: Optional[list] = None    # [dx, dy, dz] in world frame applied to place pose
     validation_question: Optional[str] = None  # Override VLM validation question for terminal steps
     stack_step: Optional[str] = None       # "forward_1" | "forward_2" | "reverse_1" | "reverse_2"
     # Intermediate tag check (stack_cups only): run before execution of this step

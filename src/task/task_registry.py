@@ -136,16 +136,21 @@ def build_task_pair_from_config(task_cfg) -> ReversibleTaskPair:
     loc_a = task_cfg.location_a
     loc_b = task_cfg.location_b
 
+    fwd_offset = list(task_cfg.forward_place_offset) if hasattr(task_cfg, "forward_place_offset") else None
+    rev_offset = list(task_cfg.reverse_place_offset) if hasattr(task_cfg, "reverse_place_offset") else None
+
     forward = TaskDefinition(
         name=f"{obj}_to_{loc_b}",
         language_task=task_cfg.forward_task,
         task_type="pick_place",
         canonical_state={"object": obj, "location": loc_a, "target": loc_b},
+        place_offset=fwd_offset,
     )
     reverse = TaskDefinition(
         name=f"{obj}_to_{loc_a}",
         language_task=task_cfg.reverse_task,
         task_type="pick_place",
         canonical_state={"object": obj, "location": loc_b, "target": loc_a},
+        place_offset=rev_offset,
     )
     return ReversibleTaskPair(forward=forward, reverse=reverse)
