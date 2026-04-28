@@ -95,9 +95,16 @@ class MotionPlanner():
             smoothened, events, proportion=1.0)
         return partial_trajectory, partial_events, key_poses
 
-    def plan_pick_place(self, pick_perception, place_perception, vlm_action=None):
+    def plan_pick_place(self, pick_perception, place_perception, vlm_action=None, place_offset=None, place_bowl_center_xy=False):
         pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.10)
-        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.10)
+        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.10, use_median_xy=place_bowl_center_xy)
+        if place_grasp_pose is not None:
+            place_grasp_pose['T_wg'][2, 3] += 0.01
+        if place_grasp_pose is not None and place_offset is not None:
+            offset = np.array(place_offset, dtype=np.float64)
+            place_grasp_pose['T_wg'][:3, 3]     += offset
+            place_grasp_pose['pre_T_wg'][:3, 3] += offset
+            log.info(f"[MotionPlanner] place_offset applied: {offset}")
         if pick_grasp_pose and place_grasp_pose:
             trajectory, events, key_poses = self.generate_trajectory(
                 vlm_action=vlm_action,
@@ -108,6 +115,7 @@ class MotionPlanner():
                 descent_max_step=0.010,
                 lift_max_step=0.010,
                 max_step=0.03,
+                close_trans_thresh=0.005,
                 ext_len=3,
             )
         else:
@@ -475,11 +483,17 @@ class MotionPlanner():
             if not _is_T_close(T_vlm, pre_pick):
                 seg = self._interpolate_poses_linear(T_vlm, pre_pick, max_step=max_step)
                 _append(traj_T, self._prune_duplicates(seg))
+            else:
+                log.warning("[Traj] pre_pick SKIPPED (T_vlm ≈ pre_pick, d=%.4fm)",
+                            np.linalg.norm(T_vlm[:3, 3] - pre_pick[:3, 3]))
 
             T_at_pre_pick = traj_T[-1] if traj_T else T_vlm
             if not _is_T_close(T_at_pre_pick, T_pick):
                 seg = self._interpolate_poses_linear(T_at_pre_pick, T_pick, max_step=descent_max_step)
                 _append(traj_T, self._prune_duplicates(seg))
+            else:
+                log.warning("[Traj] pick descent SKIPPED (T_at_pre_pick ≈ T_pick, d=%.4fm)",
+                            np.linalg.norm(T_at_pre_pick[:3, 3] - T_pick[:3, 3]))
 
             # 3) dwell + CLOSE
             _append(traj_T, [traj_T[-1]]*ext_len)
@@ -496,11 +510,17 @@ class MotionPlanner():
             if not _is_T_close(T_start, pre_place):
                 seg = self._interpolate_poses_linear(T_start, pre_place, max_step=max_step)
                 _append(traj_T, self._prune_duplicates(seg))
+            else:
+                log.warning("[Traj] pre_place SKIPPED (T_start ≈ pre_place, d=%.4fm)",
+                            np.linalg.norm(T_start[:3, 3] - pre_place[:3, 3]))
 
             T_at_pre_place = traj_T[-1] if traj_T else T_start
             if not _is_T_close(T_at_pre_place, T_place):
                 seg = self._interpolate_poses_linear(T_at_pre_place, T_place, max_step=descent_max_step)
                 _append(traj_T, self._prune_duplicates(seg))
+            else:
+                log.warning("[Traj] place descent SKIPPED (T_at_pre_place ≈ T_place, d=%.4fm)",
+                            np.linalg.norm(T_at_pre_place[:3, 3] - T_place[:3, 3]))
 
             # 5) dwell + OPEN
             _append(traj_T, [traj_T[-1]]*ext_len)
@@ -988,7 +1008,7 @@ class MotionPlanner():
             return None
         return self._make_grasp_pose_from_tag_world(T_wt, z_offset, hover_offset, xy_offset)
 
-    def _get_best_grasp_pose_from_perception(self, perception, hover_offset=0.10):
+    def _get_best_grasp_pose_from_perception(self, perception, hover_offset=0.10, use_median_xy=False):
         if perception['responses_result_is_valid']:
             object_points = self.get_reference_object_points(perception['responses_result'])
         else:
@@ -1009,7 +1029,14 @@ class MotionPlanner():
             best_grasp_pose = self.sample_best_grasp(grasp_poses)
             forced_R = np.array([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]])
             best_grasp_pose['T_wg'][:3, :3] = forced_R
-            best_grasp_pose['T_wg'][2, 3] = float(np.percentile(object_points[:, 2], 30))
+            if use_median_xy:
+                best_grasp_pose['T_wg'][0, 3], best_grasp_pose['T_wg'][1, 3] = \
+                    self._bowl_center_xy(object_points)
+                # Pan interior ≈ TABLE_Z; use fixed depth instead of percentile
+                # (1.5σ z-filter discards low-Z interior points, biasing percentile to rim)
+                best_grasp_pose['T_wg'][2, 3] = self._TABLE_Z + 0.02
+            else:
+                best_grasp_pose['T_wg'][2, 3] = float(np.percentile(object_points[:, 2], 30))
             best_grasp_pose['pre_T_wg'][:3, :3] = forced_R
             best_grasp_pose['pre_T_wg'][:3, 3] = (
                 best_grasp_pose['T_wg'][:3, 3] + np.array([0.0, 0.0, hover_offset])
@@ -1019,4 +1046,23 @@ class MotionPlanner():
             best_grasp_pose = None
 
         return best_grasp_pose
+
+    def _bowl_center_xy(self, object_points: np.ndarray):
+        """Return (cx, cy) of the pan bowl by finding the far-X edge and subtracting the bowl radius.
+
+        Handle is toward the robot (-X), bowl is away from the robot (+X).
+        Bowl center X ≈ max(X) - bowl_radius.
+        Bowl center Y ≈ median(Y) (bowl is symmetric along Y).
+        """
+        _BOWL_RADIUS = 0.075  # 21 cm diameter / 2, shifted +3 cm toward bowl center
+
+        xy = object_points[:, :2]
+        x_far = float(np.percentile(xy[:, 0], 95))  # far bowl rim (robust max)
+        cx = x_far - _BOWL_RADIUS
+        cy = float(np.median(xy[:, 1]))
+        log.info(
+            f"[BowlCenter] x_far={x_far:.4f} bowl_r={_BOWL_RADIUS:.3f} "
+            f"cx={cx:.4f} cy={cy:.4f}"
+        )
+        return cx, cy
 

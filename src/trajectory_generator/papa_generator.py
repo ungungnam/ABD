@@ -85,10 +85,16 @@ class PaPATrajectoryGenerator(BaseTrajectoryGenerator):
                 return GenerationResult(trajectory=None, metadata=metadata)
 
             # 4. Motion planning
+            # Only apply bowl-center XY correction for objects with a handle (pan).
+            place_bowl_center_xy = (
+                place_object is not None and "pan" in place_object.lower()
+            )
             trajectory, events, key_poses = self.motion_planner.plan_pick_place(
                 pick_perception=pick_perception,
                 place_perception=place_perception,
                 vlm_action=action,
+                place_offset=task.place_offset,
+                place_bowl_center_xy=place_bowl_center_xy,
             )
 
             metadata.update({
