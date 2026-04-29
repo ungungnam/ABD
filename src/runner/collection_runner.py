@@ -102,18 +102,6 @@ class CollectionRunner:
         # Environment
         self.env = build_env(config)
 
-        # Save calibration data immediately after env build so it's never lost
-        if not self.is_dummy and getattr(config.env, "do_calibration", True):
-            cal_data = getattr(self.env, "_calibration_data", None)
-            if cal_data:
-                Path(config.log_dir).mkdir(parents=True, exist_ok=True)
-                cal_path = Path(config.log_dir) / "calibration.json"
-                with open(cal_path, "w") as f:
-                    json.dump(cal_data, f, indent=2)
-                log.info(f"[CollectionRunner] Calibration data saved to {cal_path}")
-            else:
-                log.warning("[CollectionRunner] do_calibration=true but no calibration data found on env.")
-
         # Task scheduling
         if config.task.family == "stack_cups":
             task_pair = build_stack_cups_task_from_config(config.task)
@@ -137,6 +125,22 @@ class CollectionRunner:
 
         # Executor
         self.executor = TrajectoryExecutor(self.env, self.dataset_recorder)
+
+        # Save calibration data into the dataset run folder so it stays with the data
+        if not self.is_dummy and getattr(config.env, "do_calibration", True):
+            cal_data = getattr(self.env, "_calibration_data", None)
+            if cal_data:
+                if self.dataset_recorder is not None:
+                    cal_dir = self.dataset_recorder.root
+                else:
+                    cal_dir = Path(config.log_dir)
+                cal_dir.mkdir(parents=True, exist_ok=True)
+                cal_path = cal_dir / "calibration.json"
+                with open(cal_path, "w") as f:
+                    json.dump(cal_data, f, indent=2)
+                log.info(f"[CollectionRunner] Calibration data saved to {cal_path}")
+            else:
+                log.warning("[CollectionRunner] do_calibration=true but no calibration data found on env.")
 
         if self.is_dummy:
             self._init_dummy(config)
