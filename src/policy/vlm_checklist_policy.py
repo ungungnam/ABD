@@ -74,15 +74,21 @@ class VLMChecklistPolicy(BaseResetPolicy):
         checklist_dir: str,
         tau_reset: float = 0.9,
         use_cache: bool = False,
+        version: str = "",
     ):
         self.vqa_client = vqa_client
         self.checklist_dir = Path(checklist_dir)
         self.checklist_dir.mkdir(parents=True, exist_ok=True)
         self.tau_reset = tau_reset
         self.use_cache = use_cache
+        # Suffix appended to canonical task names for file lookup.
+        # "" → banana_to_pan.json (v1); "_v2" → banana_to_pan_v2.json.
+        self.version = version or ""
         self._checklists: dict = {}  # canonical_name -> loaded checklist dict (use_cache=True 시 사용)
         self.last_eval: Optional[dict] = None
         self.last_success: Optional[bool] = None  # set by needs_reset(); None if no current_task items
+        if self.version:
+            log.info(f"[VLMChecklistPolicy] Using checklist version suffix '{self.version}'")
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -133,7 +139,7 @@ class VLMChecklistPolicy(BaseResetPolicy):
     # ------------------------------------------------------------------ #
 
     def _checklist_path(self, task_name: str) -> Path:
-        return self.checklist_dir / f"{task_name}.json"
+        return self.checklist_dir / f"{task_name}{self.version}.json"
 
     def _canonical_checklist_name(self, task) -> str:
         """Return the canonical checklist file stem for this task."""

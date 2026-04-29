@@ -1,0 +1,29 @@
+{
+  "_design_notes": [
+    "v2 changes vs banana_to_pan.json:",
+    "- removed v1 common ids 1/2/3 (robot safe, gripper intact, perception reliable): VLM cannot judge from a single snapshot; were noise.",
+    "- removed v1 common id 5 (within reachable workspace): kinematic check, not visual.",
+    "- merged 'banana visible' into a single scene-state question.",
+    "- current_task: kept success_item, added 'plate is empty' (verifies banana left source); kept detection passthroughs.",
+    "- next_task: kept pan-readiness checks; merged 'accessible' + 'free space' into one.",
+    "- success_item weight raised to 0.6 to dominate the score.",
+    "- safety items (id 1, 2) ADDED BACK with low weights (0.15 each) so a visibly broken gripper or a fallen object pulls the score below tau without re-introducing the v1 noise floor.",
+    "  Together they contribute 0.3 of total weight — enough that one safety violation alone (~0.15) drops a perfect-task score from 1.0 to ~0.83 < 0.9 → reset."
+  ],
+  "common": [
+    {"id": 1, "question": "Is the robot arm and gripper visibly intact (no broken parts, no hanging cables, no obvious damage)?", "weight": 0.15},
+    {"id": 2, "question": "Is the work area clear of task objects that have fallen on the floor or far outside the working surface?", "weight": 0.15},
+    {"id": 3, "question": "Is the banana clearly visible somewhere in the scene (across the available views)?", "weight": 0.3},
+    {"id": 4, "question": "Are objects on the table upright and stable, with nothing knocked over or spilled?", "weight": 0.2}
+  ],
+  "current_task": [
+    {"id": 5, "question": "Is the banana currently placed inside the pan?", "weight": 0.6, "success_item": true},
+    {"id": 6, "question": "Is the plate empty, with no banana resting on it?", "weight": 0.3},
+    {"id": 7, "question": "Based on the object detection status provided, is the banana successfully detected?", "weight": 0.3},
+    {"id": 8, "question": "Based on the object detection status provided, is the pan successfully detected?", "weight": 0.3}
+  ],
+  "next_task": [
+    {"id": 9, "question": "Is the pan unobstructed and has free space above and around it for placement?", "weight": 0.3},
+    {"id": 10, "question": "Is the pan resting stably and unlikely to tip during placement?", "weight": 0.1}
+  ]
+}

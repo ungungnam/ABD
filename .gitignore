@@ -1,6 +1,9 @@
 # Outputs and logs
 outputs/
 
+# Local data (videos, extracted frames, datasets)
+data/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -25,6 +28,9 @@ venv/
 # Claude Code
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+
+# oh-my-claudecode
+.omc/
 
 # OS
 .DS_Store

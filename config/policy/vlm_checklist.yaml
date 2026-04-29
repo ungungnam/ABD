@@ -12,3 +12,9 @@ checklist_dir: ${hydra:runtime.cwd}/config/checklists
 tau_reset: 0.9
 max_fail_count: 5
 use_cache: false  # true: 프로세스 내 메모리 캐시 사용 (실행 중 파일 수정 미반영)
+
+# Checklist version suffix. "" = v1 (default), "_v2" = v2.
+# Files are looked up as {checklist_dir}/{task_name}{version}.json — e.g.
+# version="_v2" loads banana_to_pan_v2.json. Override on the CLI:
+#   python scripts/main.py policy.version=_v2
+version: ""

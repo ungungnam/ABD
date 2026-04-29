@@ -77,6 +77,7 @@ def build_policy(
             checklist_dir=config.policy.checklist_dir,
             tau_reset=config.policy.tau_reset,
             use_cache=getattr(config.policy, "use_cache", False),
+            version=getattr(config.policy, "version", ""),
         )
     else:
         raise ValueError(f"Unknown policy method: {method}")

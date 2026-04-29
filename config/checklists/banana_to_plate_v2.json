@@ -1,0 +1,25 @@
+{
+  "_design_notes": [
+    "v2 changes vs banana_to_plate.json:",
+    "- removed meta-items (robot safe, gripper functioning, sensors reliable, reachable workspace).",
+    "- current_task: success_item, added 'pan is empty', kept detection passthroughs.",
+    "- next_task: collapsed accessible+free-space duplicate; kept stability.",
+    "- safety items (id 1, 2) ADDED BACK at low weight (0.15 each) for visible hardware-damage / fallen-object detection."
+  ],
+  "common": [
+    {"id": 1, "question": "Is the robot arm and gripper visibly intact (no broken parts, no hanging cables, no obvious damage)?", "weight": 0.15},
+    {"id": 2, "question": "Is the work area clear of task objects that have fallen on the floor or far outside the working surface?", "weight": 0.15},
+    {"id": 3, "question": "Is the banana clearly visible somewhere in the scene (across the available views)?", "weight": 0.3},
+    {"id": 4, "question": "Are objects on the table upright and stable, with nothing knocked over or spilled?", "weight": 0.2}
+  ],
+  "current_task": [
+    {"id": 5, "question": "Is the banana currently placed on the plate?", "weight": 0.6, "success_item": true},
+    {"id": 6, "question": "Is the pan empty, with no banana resting in it?", "weight": 0.3},
+    {"id": 7, "question": "Based on the object detection status provided, is the banana successfully detected?", "weight": 0.3},
+    {"id": 8, "question": "Based on the object detection status provided, is the plate successfully detected?", "weight": 0.3}
+  ],
+  "next_task": [
+    {"id": 9, "question": "Is the plate unobstructed and has free space above and around it for placement?", "weight": 0.3},
+    {"id": 10, "question": "Is the plate resting stably and unlikely to tip during placement?", "weight": 0.1}
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "_design_notes": [
+    "v2 changes vs close_drawer.json:",
+    "- removed meta + non-visible items (sensors reliable, guide condition, stably mounted).",
+    "- current_task: kept success_item, detection, rotation;",
+    "  ADDED 'drawer face is flush with cabinet (no visible gap)' to make 'closed' more strictly verifiable than 'no interior visible' alone.",
+    "- next_task: dropped 'all drawers properly inserted' (assumes other drawers in view; weight 0.5 dominated score).",
+    "  kept stability item with low weight.",
+    "- safety items (id 1, 2) ADDED BACK at low weight (0.15 each).",
+    "- only wrist + table cameras are used (front excluded by runner)."
+  ],
+  "common": [
+    {"id": 1, "question": "Is the robot arm and gripper visibly intact (no broken parts, no hanging cables, no obvious damage)?", "weight": 0.15},
+    {"id": 2, "question": "Is the area clear of task objects or hardware fragments that have fallen on the floor or far outside the working surface?", "weight": 0.15},
+    {"id": 3, "question": "Is the drawer handle clearly visible?", "weight": 0.3},
+    {"id": 4, "question": "Is the surrounding area free of foreign objects or hazards on or around the drawer?", "weight": 0.2}
+  ],
+  "current_task": [
+    {"id": 5, "question": "Is the drawer closed so that none of its interior is visible?", "weight": 0.5, "success_item": true},
+    {"id": 6, "question": "Is the drawer face flush with the cabinet, with no visible gap between the drawer and the surrounding cabinet?", "weight": 0.3},
+    {"id": 7, "question": "Based on the object detection status provided, is the drawer's AprilTag successfully detected?", "weight": 0.3},
+    {"id": 8, "question": "Based on the object detection status provided, is the drawer rotation angle less than 15 degrees from front-facing?", "weight": 0.3}
+  ],
+  "next_task": [
+    {"id": 9, "question": "Is the drawer handle unobstructed and accessible for grasping?", "weight": 0.2}
+  ]
+}

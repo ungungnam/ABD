@@ -1,0 +1,27 @@
+{
+  "_design_notes": [
+    "v2 changes vs open_drawer.json:",
+    "- removed v1 common ids 3/7/8 (perception reliable, guide condition not visible, mounted-stably-and-moves-freely is multi-frame inference).",
+    "- kept handle visibility/reach (renumbered).",
+    "- current_task: kept success_item, kept detection+rotation passthroughs;",
+    "  ADDED 'drawer opening shows clear gap of several centimeters' to discourage 'barely cracked open' false positives.",
+    "- next_task: kept handle accessibility.",
+    "- safety items (id 1, 2) ADDED BACK at low weight (0.15 each).",
+    "- only wrist + table cameras are used (front excluded by runner)."
+  ],
+  "common": [
+    {"id": 1, "question": "Is the robot arm and gripper visibly intact (no broken parts, no hanging cables, no obvious damage)?", "weight": 0.15},
+    {"id": 2, "question": "Is the area clear of task objects or hardware fragments that have fallen on the floor or far outside the working surface?", "weight": 0.15},
+    {"id": 3, "question": "Is the drawer handle clearly visible?", "weight": 0.3},
+    {"id": 4, "question": "Is the surrounding area free of foreign objects or hazards on or around the drawer?", "weight": 0.2}
+  ],
+  "current_task": [
+    {"id": 5, "question": "Is the drawer open far enough that the interior of the drawer is clearly visible?", "weight": 0.5, "success_item": true},
+    {"id": 6, "question": "Is there a clear gap of several centimeters between the drawer face and the surrounding cabinet (i.e., not just barely cracked open)?", "weight": 0.3},
+    {"id": 7, "question": "Based on the object detection status provided, is the drawer's AprilTag successfully detected?", "weight": 0.3},
+    {"id": 8, "question": "Based on the object detection status provided, is the drawer rotation angle less than 15 degrees from front-facing?", "weight": 0.3}
+  ],
+  "next_task": [
+    {"id": 9, "question": "Is the drawer handle unobstructed and accessible for grasping?", "weight": 0.2}
+  ]
+}

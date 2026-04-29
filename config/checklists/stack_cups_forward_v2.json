@@ -1,0 +1,26 @@
+{
+  "_design_notes": [
+    "v2 changes vs stack_cups_forward.json:",
+    "- common: removed meta-items (sensors, reachable workspace, clear path).",
+    "- kept 'cups upright' and 'no spills'.",
+    "- current_task: kept reset_group=1 success items; added 'all in single stack'; kept detection.",
+    "- next_task: kept stability.",
+    "- safety items (id 1, 2) ADDED BACK at low weight (0.15 each)."
+  ],
+  "common": [
+    {"id": 1, "question": "Is the robot arm and gripper visibly intact (no broken parts, no hanging cables, no obvious damage)?", "weight": 0.15},
+    {"id": 2, "question": "Is the work area clear of task objects that have fallen on the floor or far outside the working surface?", "weight": 0.15},
+    {"id": 3, "question": "Are all the cups upright (none knocked over or lying on their side)?", "weight": 0.3},
+    {"id": 4, "question": "Is the workspace free of spilled materials or foreign objects?", "weight": 0.2}
+  ],
+  "current_task": [
+    {"id": 5, "question": "Is the purple cup stacked on top of the blue cup?", "weight": 0.5, "success_item": true, "success_answer": "yes", "reset_group": 1},
+    {"id": 6, "question": "Is the pink cup stacked on top of the purple cup?", "weight": 0.5, "success_item": true, "success_answer": "yes", "reset_group": 1},
+    {"id": 7, "question": "Are all three cups arranged in a single stack (rather than as two separate piles)?", "weight": 0.3},
+    {"id": 8, "question": "Based on the object detection status provided, is the pick cup successfully detected?", "weight": 0.3},
+    {"id": 9, "question": "Based on the object detection status provided, is the place cup successfully detected?", "weight": 0.3}
+  ],
+  "next_task": [
+    {"id": 10, "question": "Are the cups resting stably and unlikely to fall during further interaction?", "weight": 0.2}
+  ]
+}

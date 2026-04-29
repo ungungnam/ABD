@@ -1,0 +1,28 @@
+{
+  "_design_notes": [
+    "v2 changes vs stack_cups_reverse.json:",
+    "- common: same trim as forward.",
+    "- current_task: kept reset_group=1 negative-success items (both should be NO);",
+    "  ADDED redundant success_item asking the same separation fact in positive form ('three cups standing separately, none on top of another').",
+    "  Reverse task success = cups are separated. Their exact positions DO NOT matter — the next forward attempt re-detects each cup via AprilTag, so any non-stacked layout is acceptable.",
+    "  This extra item just gives the score a positive-weight signal alongside the two negative-weight rg=1 items, so a successful unstack is rewarded by a positive contribution rather than only by 'absence of stacking'.",
+    "- kept detection.",
+    "- next_task: stability.",
+    "- safety items (id 1, 2) ADDED BACK at low weight (0.15 each)."
+  ],
+  "common": [
+    {"id": 1, "question": "Is the robot arm and gripper visibly intact (no broken parts, no hanging cables, no obvious damage)?", "weight": 0.15},
+    {"id": 2, "question": "Is the work area clear of task objects that have fallen on the floor or far outside the working surface?", "weight": 0.15},
+    {"id": 3, "question": "Are all the cups upright (none knocked over or lying on their side)?", "weight": 0.3},
+    {"id": 4, "question": "Is the workspace free of spilled materials or foreign objects?", "weight": 0.2}
+  ],
+  "current_task": [
+    {"id": 5, "question": "Is the purple cup stacked on top of the blue cup?", "weight": -0.5, "success_item": true, "success_answer": "no", "reset_group": 1},
+    {"id": 6, "question": "Is the pink cup stacked on top of the purple cup?", "weight": -0.5, "success_item": true, "success_answer": "no", "reset_group": 1},
+    {"id": 7, "question": "Are the three cups standing as three separate cups on the table, with no cup on top of another?", "weight": 0.4, "success_item": true, "success_answer": "yes"},
+    {"id": 8, "question": "Based on the object detection status provided, is the pick cup successfully detected?", "weight": 0.3}
+  ],
+  "next_task": [
+    {"id": 9, "question": "Are the cups resting stably and unlikely to fall during further interaction?", "weight": 0.2}
+  ]
+}
