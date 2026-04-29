@@ -7,7 +7,7 @@
     },
     {
       "id": 2,
-      "question": "Is the robot\u2019s gripper or end-effector intact and operational?",
+      "question": "Is the robot's gripper or end-effector intact and operational?",
       "weight": 0.4
     },
     {

@@ -96,8 +96,8 @@ class MotionPlanner():
         return partial_trajectory, partial_events, key_poses
 
     def plan_pick_place(self, pick_perception, place_perception, vlm_action=None, place_offset=None, place_bowl_center_xy=False):
-        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.07)
-        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.15, use_median_xy=place_bowl_center_xy)
+        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.05)
+        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.05, use_median_xy=place_bowl_center_xy)
         if place_grasp_pose is not None:
             place_grasp_pose['T_wg'][2, 3] += 0.01
         if place_grasp_pose is not None and place_offset is not None:
@@ -111,7 +111,7 @@ class MotionPlanner():
                 pick_grasp_pose=pick_grasp_pose,
                 place_grasp_pose=place_grasp_pose,
                 post_lift=True,
-                post_lift_height=0.10,
+                post_lift_height=0.05,
                 descent_max_step=0.010,
                 lift_max_step=0.010,
                 max_step=0.03,
@@ -423,8 +423,8 @@ class MotionPlanner():
             close_rot_thresh_deg: float = 10.0,
             ext_len=3,
             post_lift: bool = True,
-            post_lift_height: float = 0.15,
-            descent_max_step: float = 0.015,
+            post_lift_height: float = 0.05,
+            descent_max_step: float = 0.05,
             lift_max_step: float = 0.05,
             max_step: float = 0.05,
     ) -> Tuple[List[np.ndarray], List[Dict[str, Any]]]:
@@ -1047,16 +1047,18 @@ class MotionPlanner():
 
         return best_grasp_pose
 
-    @staticmethod
-    def _adapt_R_to_long_axis(obb) -> np.ndarray:
-        """Rotate base gripper orientation around world-Z so the closing axis is
-        perpendicular to the object's longest horizontal axis.
+    @classmethod
+    def _adapt_R_to_long_axis(cls, obb) -> np.ndarray:
+        """Rotate gripper orientation around world-Z to align closing axis with
+        the object's longest horizontal axis.
 
-        Only applied when the object is elongated (long/mid axis ratio >= 1.5)
-        and the long axis has a meaningful horizontal component.
+        Uses _grasp_R() (Y-tilt included) as base so IK behaviour matches
+        other tasks (stack_cups, drawer).  Only applied when the object is
+        elongated (long/mid axis ratio >= 1.5) and the long axis has a
+        meaningful horizontal component.
         For roughly circular objects (pan, plate) the base rotation is returned unchanged.
         """
-        base_R = np.array([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]], dtype=np.float64)
+        base_R = cls._grasp_R()
         if obb is None:
             return base_R
 
@@ -1078,11 +1080,8 @@ class MotionPlanner():
         elif theta < -np.pi / 2:
             theta += np.pi
 
-        # base_R closing axis (col 0) is [-1,0,0] (bipolar: ≡ [1,0,0]).
-        # We want closing ∥ long axis → closing angle = theta.
-        # delta = theta gives the same final orientation as delta = theta - pi
-        # (bipolar axes differ by pi), but keeps delta in [-pi/2, pi/2] so the
-        # wrist always takes the shortest path (≤ 90°).
+        # Rotate base_R around world-Z by delta = theta so closing axis aligns
+        # with the long axis.  delta in [-pi/2, pi/2] guarantees shortest path (≤90°).
         delta = theta
 
         c, s = np.cos(delta), np.sin(delta)
