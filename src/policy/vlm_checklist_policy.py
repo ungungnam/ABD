@@ -73,12 +73,14 @@ class VLMChecklistPolicy(BaseResetPolicy):
         vqa_client: VQAClient,
         checklist_dir: str,
         tau_reset: float = 0.9,
+        use_cache: bool = False,
     ):
         self.vqa_client = vqa_client
         self.checklist_dir = Path(checklist_dir)
         self.checklist_dir.mkdir(parents=True, exist_ok=True)
         self.tau_reset = tau_reset
-        self._checklists: dict = {}  # canonical_name -> loaded checklist dict
+        self.use_cache = use_cache
+        self._checklists: dict = {}  # canonical_name -> loaded checklist dict (use_cache=True 시 사용)
         self.last_eval: Optional[dict] = None
         self.last_success: Optional[bool] = None  # set by needs_reset(); None if no current_task items
 
@@ -142,7 +144,7 @@ class VLMChecklistPolicy(BaseResetPolicy):
 
     def _load_or_generate(self, task) -> dict:
         name = self._canonical_checklist_name(task)
-        if name in self._checklists:
+        if self.use_cache and name in self._checklists:
             return self._checklists[name]
 
         path = self._checklist_path(name)
@@ -161,13 +163,15 @@ class VLMChecklistPolicy(BaseResetPolicy):
             log.info(f"[VLMChecklistPolicy] Wrote new checklist to {path}")
 
         self._validate_checklist_schema(checklist, name)
-        self._checklists[name] = checklist
+        if self.use_cache:
+            self._checklists[name] = checklist
         return checklist
 
     def _load_by_name(self, name: str) -> Optional[dict]:
         """Load checklist by canonical name without VLM generation."""
-        if name in self._checklists:
+        if self.use_cache and name in self._checklists:
             return self._checklists[name]
+
         path = self._checklist_path(name)
         if not path.exists():
             log.warning(
@@ -178,7 +182,8 @@ class VLMChecklistPolicy(BaseResetPolicy):
         with open(path) as f:
             checklist = json.load(f)
         self._validate_checklist_schema(checklist, name)
-        self._checklists[name] = checklist
+        if self.use_cache:
+            self._checklists[name] = checklist
         return checklist
 
     def _generate_checklist(self, task) -> dict:

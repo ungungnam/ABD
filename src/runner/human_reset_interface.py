@@ -21,6 +21,43 @@ log = logging.getLogger(__name__)
 class HumanResetInterface:
     """Terminal-based human reset prompt."""
 
+    def request_ground_truth_success_label(self, policy_success: bool) -> int:
+        """Ask the operator to label the validator's success decision vs. ground truth.
+
+        Returns:
+            1 = True Positive  (actually succeeded  / policy: success)
+            2 = True Negative  (actually failed      / policy: failure)
+            3 = False Positive (actually failed      / policy: success)
+            4 = False Negative (actually succeeded   / policy: failure)
+        """
+        policy_str = "success" if policy_success else "failure"
+        print()
+        print("-" * 60)
+        print(f"  SUCCESS DETECTION GT  (policy predicted: {policy_str})")
+        print("  1 = True Positive  (actually succeeded  / policy: success)")
+        print("  2 = True Negative  (actually failed      / policy: failure)")
+        print("  3 = False Positive (actually failed      / policy: success)")
+        print("  4 = False Negative (actually succeeded   / policy: failure)")
+        print("-" * 60)
+        sys.stdout.write("  Label (1/2/3/4) > ")
+        sys.stdout.flush()
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            while True:
+                r, _, _ = select.select([sys.stdin], [], [])
+                if not r:
+                    continue
+                ch = sys.stdin.read(1)
+                if ch in ("1", "2", "3", "4"):
+                    print()
+                    log.info(f"[GroundTruthSuccess] Input key: {ch}")
+                    return int(ch)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
     def request_ground_truth_label(self) -> int:
         """Ask the operator to label the policy's reset decision vs. ground truth.
 

@@ -23,7 +23,7 @@ class VLMPlanner:
         response = self.backend.generate(
             VLMRequest(prompt=prompt, images=observation, task_kind="plan")
         )
-        log.debug(f"[VLMPlanner] raw response:\n{response}")
+        log.info(f"[VLMPlanner] raw response:\n{response}")
         plan = self.parse_response_to_plan(response)
         pick, place, action = plan
         log.info(f"[VLMPlanner] parsed → pick={pick}, place={place}, action={action}")

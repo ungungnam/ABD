@@ -58,7 +58,7 @@ class MotionPlanner():
 
     # ---- Drawer constants ----
     _HANDLE_TAG_OFFSET  = np.array([0.05, 0.035, 0.03])  # handle pos in AprilTag frame (x,y,z)
-    _DRAWER_PULL_DIST   = 0.095    # open/close distance along world X (m)
+    _DRAWER_PULL_DIST   = 0.110    # open/close distance along world X (m)
     _DRAWER_APPROACH    = 0.08    # pre-pick offset in +X from handle (m)
 
     _DRAWER_TILT_Y_DEG = +45  # gripper tilt around Y axis for drawer grasp (degrees)
@@ -96,8 +96,8 @@ class MotionPlanner():
         return partial_trajectory, partial_events, key_poses
 
     def plan_pick_place(self, pick_perception, place_perception, vlm_action=None, place_offset=None, place_bowl_center_xy=False):
-        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.10)
-        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.10, use_median_xy=place_bowl_center_xy)
+        pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.07)
+        place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.15, use_median_xy=place_bowl_center_xy)
         if place_grasp_pose is not None:
             place_grasp_pose['T_wg'][2, 3] += 0.01
         if place_grasp_pose is not None and place_offset is not None:
@@ -469,7 +469,7 @@ class MotionPlanner():
                 post_pick[:3, 3] = T_pick[:3, 3] + np.array([0.0, 0.0, post_lift_height])
                 post_place = T_place.copy()
                 post_place[:3, 3] = T_place[:3, 3] + np.array([0.0, 0.0, post_lift_height])
-                key_poses = [T_pick]
+                key_poses = [pre_pick, T_pick, pre_place, T_place]
 
             # 1) cur -> vlm(pick)
             if vlm_action is not None:
@@ -837,7 +837,7 @@ class MotionPlanner():
             # Pick: grasp closed handle, shift 1 cm toward robot (-X)
             T_pick[:3, 3] = p_handle + np.array([-0.01, 0.0, 0.0])
             # Place: pull -X by a random distance in [6 cm, 9 cm]
-            pull_dist = np.random.uniform(0.06, 0.09)
+            pull_dist = np.random.uniform(0.07, 0.11)
             T_place[:3, 3] = p_handle + np.array([-pull_dist, 0.0, 0.0])
         else:
             # Pick: open handle position (closed handle - pull_dist), -1cm X buffer, -3cm Z
@@ -1027,14 +1027,14 @@ class MotionPlanner():
             obb = fit_obb_pca(object_points)
             grasp_poses = generate_grasps_from_obb(obb, rotation=self.current_pose()[:3, :3])
             best_grasp_pose = self.sample_best_grasp(grasp_poses)
-            forced_R = np.array([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]])
+            forced_R = self._adapt_R_to_long_axis(obb)
             best_grasp_pose['T_wg'][:3, :3] = forced_R
             if use_median_xy:
                 best_grasp_pose['T_wg'][0, 3], best_grasp_pose['T_wg'][1, 3] = \
                     self._bowl_center_xy(object_points)
                 # Pan interior ≈ TABLE_Z; use fixed depth instead of percentile
                 # (1.5σ z-filter discards low-Z interior points, biasing percentile to rim)
-                best_grasp_pose['T_wg'][2, 3] = self._TABLE_Z + 0.02
+                best_grasp_pose['T_wg'][2, 3] = self._TABLE_Z + 0.03
             else:
                 best_grasp_pose['T_wg'][2, 3] = float(np.percentile(object_points[:, 2], 30))
             best_grasp_pose['pre_T_wg'][:3, :3] = forced_R
@@ -1047,6 +1047,57 @@ class MotionPlanner():
 
         return best_grasp_pose
 
+    @staticmethod
+    def _adapt_R_to_long_axis(obb) -> np.ndarray:
+        """Rotate base gripper orientation around world-Z so the closing axis is
+        perpendicular to the object's longest horizontal axis.
+
+        Only applied when the object is elongated (long/mid axis ratio >= 1.5)
+        and the long axis has a meaningful horizontal component.
+        For roughly circular objects (pan, plate) the base rotation is returned unchanged.
+        """
+        base_R = np.array([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]], dtype=np.float64)
+        if obb is None:
+            return base_R
+
+        extents = obb["extents"]
+        if extents[1] < 1e-6 or extents[0] / extents[1] < 1.5:
+            return base_R  # not elongated enough
+
+        # First principal axis = long axis (largest eigenvalue from fit_obb_pca)
+        long_axis = obb["R"][:, 0]
+        lx, ly = float(long_axis[0]), float(long_axis[1])
+
+        if np.hypot(lx, ly) < 0.15:
+            return base_R  # long axis is mostly vertical — no yaw adjustment
+
+        # Normalize to [-pi/2, pi/2] (long axis is bipolar)
+        theta = np.arctan2(ly, lx)
+        if theta > np.pi / 2:
+            theta -= np.pi
+        elif theta < -np.pi / 2:
+            theta += np.pi
+
+        # base_R closing axis (col 0) is [-1,0,0] (bipolar: ≡ [1,0,0]).
+        # We want closing ∥ long axis → closing angle = theta.
+        # delta = theta gives the same final orientation as delta = theta - pi
+        # (bipolar axes differ by pi), but keeps delta in [-pi/2, pi/2] so the
+        # wrist always takes the shortest path (≤ 90°).
+        delta = theta
+
+        c, s = np.cos(delta), np.sin(delta)
+        Rz = np.array([[ c, -s, 0.],
+                       [ s,  c, 0.],
+                       [0., 0., 1.]], dtype=np.float64)
+        adapted_R = Rz @ base_R
+
+        log.info(
+            f"[MotionPlanner] Long-axis grasp: theta={np.degrees(theta):.1f}° "
+            f"delta_yaw={np.degrees(delta):.1f}° "
+            f"aspect={extents[0]/extents[1]:.2f}"
+        )
+        return adapted_R
+
     def _bowl_center_xy(self, object_points: np.ndarray):
         """Return (cx, cy) of the pan bowl by finding the far-X edge and subtracting the bowl radius.
 
@@ -1054,7 +1105,7 @@ class MotionPlanner():
         Bowl center X ≈ max(X) - bowl_radius.
         Bowl center Y ≈ median(Y) (bowl is symmetric along Y).
         """
-        _BOWL_RADIUS = 0.075  # 21 cm diameter / 2, shifted +3 cm toward bowl center
+        _BOWL_RADIUS = 0.085  # 21 cm diameter / 2, shifted +3 cm, pulled -1 cm toward robot
 
         xy = object_points[:, :2]
         x_far = float(np.percentile(xy[:, 0], 95))  # far bowl rim (robust max)

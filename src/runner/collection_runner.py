@@ -4,6 +4,7 @@ Implements the full system loop from Section 11 of the spec:
   observation -> generate trajectory -> execute -> validate -> ABD -> control action
 """
 
+import json
 import time
 import uuid
 import logging
@@ -75,6 +76,7 @@ def build_policy(
             vqa_client=vqa_client,
             checklist_dir=config.policy.checklist_dir,
             tau_reset=config.policy.tau_reset,
+            use_cache=getattr(config.policy, "use_cache", False),
         )
     else:
         raise ValueError(f"Unknown policy method: {method}")
@@ -98,6 +100,18 @@ class CollectionRunner:
 
         # Environment
         self.env = build_env(config)
+
+        # Save calibration data immediately after env build so it's never lost
+        if not self.is_dummy and getattr(config.env, "do_calibration", True):
+            cal_data = getattr(self.env, "_calibration_data", None)
+            if cal_data:
+                Path(config.log_dir).mkdir(parents=True, exist_ok=True)
+                cal_path = Path(config.log_dir) / "calibration.json"
+                with open(cal_path, "w") as f:
+                    json.dump(cal_data, f, indent=2)
+                log.info(f"[CollectionRunner] Calibration data saved to {cal_path}")
+            else:
+                log.warning("[CollectionRunner] do_calibration=true but no calibration data found on env.")
 
         # Task scheduling
         if config.task.family == "stack_cups":
@@ -180,8 +194,18 @@ class CollectionRunner:
             config_dict = {"raw": str(self.config)}
         self.metrics.save_run_config(config_dict)
 
+        try:
+            self._run_loop()
+        finally:
+            self._finalize()
+
+    def _run_loop(self):
+
         if not self.is_dummy:
-            input("\n[Calibration complete] Press Enter to start data collection...")
+            if getattr(self.config.env, "do_calibration", True):
+                input("\n[Calibration complete] Press Enter to start data collection...")
+            else:
+                input("\n[Calibration loaded from file] Press Enter to start data collection...")
 
         # stack_cups only: choose starting phase (single keypress, no Enter needed)
         # if self.config.task.family == "stack_cups":
@@ -555,6 +579,7 @@ class CollectionRunner:
                     ep += 1
                     if not should_continue:
                         if not self.is_dummy and was_terminal_step:
+                            record.ground_truth_success = self.human_interface.request_ground_truth_success_label(success)
                             record.ground_truth_reset = self.human_interface.request_ground_truth_label()
                         self.metrics.log_episode(record)
                         if self.dataset_recorder is not None:
@@ -569,6 +594,7 @@ class CollectionRunner:
                     task.task_type == "stack_cups" and decision == "reset"
                 )
                 if not self.is_dummy and _needs_gt_label:
+                    record.ground_truth_success = self.human_interface.request_ground_truth_success_label(success)
                     record.ground_truth_reset = self.human_interface.request_ground_truth_label()
 
                 # Save episode data.
@@ -603,34 +629,13 @@ class CollectionRunner:
                 print("\n\n[비상 정지] Ctrl+C 입력됨. 현재 에피소드를 중단하고 run을 종료합니다.")
                 log.warning(f"[EmergencyStop] Episode {ep} interrupted by user (Ctrl+C).")
 
-                # 버퍼에 프레임이 있으면 버림 (중단된 에피소드는 저장하지 않음)
+                # 진행 중이던 에피소드는 버리고 통계에서 제외
                 if self.dataset_recorder is not None:
                     self.dataset_recorder.clear_episode_buffer()
-
-                # 에피소드 실패로 기록 (human_reset=False: reset 아님)
-                stop_time = time.time()
-                self.manifest.log_episode(
-                    episode_idx=ep, episode_id=episode_id, run_id=self.run_id,
-                    task_name=task.name, success=False,
-                    policy_method=self.policy_method, failure_type="emergency_stop",
-                )
-                self.metrics.log_episode(EpisodeRecord(
-                    episode_idx=ep,
-                    episode_id=episode_id,
-                    run_id=self.run_id,
-                    policy_method=self.policy_method,
-                    task_name=task.name,
-                    task_direction=task_direction,
-                    success=False,
-                    policy_decision="aborted",
-                    human_reset=False,
-                    failure_type="emergency_stop",
-                    fail_count=fail_count,
-                    episode_duration=stop_time - episode_start_time,
-                ))
                 break
 
-        # Finalize — 정상 종료와 비상 정지 모두 여기서 저장
+    def _finalize(self):
+        """정상 종료 및 Ctrl+C 중단 시 항상 실행되는 저장 루틴."""
         self.metrics.save()
         self.manifest.save()
         if self.dataset_recorder is not None:

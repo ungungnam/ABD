@@ -55,7 +55,7 @@ class VLMValidator(BaseTaskValidator):
             question = task.validation_question
         elif task.task_type == "open_drawer":
             drawer_state = task.canonical_state.get("drawer", "open")
-            question = "Is the drawer open?" if drawer_state == "open" else "Is the drawer closed?"
+            question = "Is the drawer open?" if drawer_state == "open" else "Are all 4 drawers closed?"
         else:
             obj_name    = task.canonical_state["object"]
             target_name = task.canonical_state["target"]

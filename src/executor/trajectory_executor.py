@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _IK_POS_THRESHOLD_M  = 0.05   # position error that triggers fallback
 _IK_SETTLE_S         = 0.10   # extra settle time inside each fallback attempt
-_IK_ANGLE_STEPS_DEG  = [0, 2, 4, 6, 8, 10]
+_IK_ANGLE_STEPS_DEG  = [0, 5, 10]
 _IK_AXES = [
     np.array([1., 0., 0.]),
     np.array([-1., 0., 0.]),

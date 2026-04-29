@@ -32,7 +32,8 @@ class EpisodeRecord:
     generation_success: bool = True                # False if trajectory gen failed
     dataset_episode_idx: Optional[int] = None      # index in success-only dataset
     checklist_eval: Optional[dict] = None          # VLMChecklist result: score + per-item breakdown
-    ground_truth_reset: Optional[int] = None       # 1=TP, 2=TN, 3=FP, 4=FN
+    ground_truth_success: Optional[int] = None      # 1=TP, 2=TN, 3=FP, 4=FN (success detection)
+    ground_truth_reset: Optional[int] = None        # 1=TP, 2=TN, 3=FP, 4=FN (reset policy)
     # --- timing (all durations in seconds) ---
     episode_duration: Optional[float] = None       # total episode time (includes human reset wait if any)
     reset_prompt_to_confirm: Optional[float] = None    # time human took to confirm reset

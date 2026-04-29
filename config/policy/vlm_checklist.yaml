@@ -11,3 +11,4 @@ checklist_dir: ${hydra:runtime.cwd}/config/checklists
 #   score < tau_retry             -> "reset"
 tau_reset: 0.9
 max_fail_count: 5
+use_cache: false  # true: 프로세스 내 메모리 캐시 사용 (실행 중 파일 수정 미반영)
