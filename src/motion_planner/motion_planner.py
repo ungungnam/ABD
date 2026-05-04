@@ -99,7 +99,17 @@ class MotionPlanner():
         pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.05)
         place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.05, use_median_xy=place_bowl_center_xy)
         if place_grasp_pose is not None:
-            place_grasp_pose['T_wg'][2, 3] += 0.01
+            # Force place orientation to base _grasp_R() so the held object
+            # always ends up along world X (closing axis = world Y) regardless
+            # of the place container's PCA — keeps banana laid front-back.
+            base_R = self._grasp_R()
+            place_grasp_pose['T_wg'][:3, :3] = base_R
+            place_grasp_pose['pre_T_wg'][:3, :3] = base_R
+            # Always drop from a fixed height = TABLE_Z + 3 cm, regardless of
+            # the perceived container Z, so the object falls cleanly.
+            drop_z = self._TABLE_Z + 0.03
+            place_grasp_pose['T_wg'][2, 3] = drop_z
+            place_grasp_pose['pre_T_wg'][2, 3] = drop_z + 0.05
         if place_grasp_pose is not None and place_offset is not None:
             offset = np.array(place_offset, dtype=np.float64)
             place_grasp_pose['T_wg'][:3, 3]     += offset
@@ -757,6 +767,10 @@ class MotionPlanner():
             # Cache pick cup's original position keyed by tag_id (used for unstack place).
             if T_pick_wt is not None:
                 self._tag_position_cache[pick_tag_id] = T_pick_wt
+                log.info(
+                    f"[StackCups] cache[{pick_tag_id}] <- "
+                    f"{T_pick_wt[:3,3].round(3).tolist()} (forward step={stack_step})"
+                )
 
         if T_pick_wt is None:
             return None, None, False, False
@@ -778,6 +792,13 @@ class MotionPlanner():
             place_pose = self._make_grasp_pose_from_tag_world(
                 cached_T, z_offset=place_z, hover_offset=place_hover,
                 xy_offset=self._PLACE_TAG_XY_OFFSET)
+            log.info(
+                f"[StackCups] reverse step={stack_step} tag={pick_tag_id} | "
+                f"pick_T_wt={T_pick_wt[:3,3].round(3).tolist()} | "
+                f"cached_T={cached_T[:3,3].round(3).tolist()} | "
+                f"place T_wg={place_pose['T_wg'][:3,3].round(3).tolist()} | "
+                f"place pre_T_wg={place_pose['pre_T_wg'][:3,3].round(3).tolist()}"
+            )
         else:
             # Stack: place on top of the place tag's current position.
             if T_place_wt is None:
@@ -1049,8 +1070,9 @@ class MotionPlanner():
 
     @classmethod
     def _adapt_R_to_long_axis(cls, obb) -> np.ndarray:
-        """Rotate gripper orientation around world-Z to align closing axis with
-        the object's longest horizontal axis.
+        """Rotate gripper orientation around world-Z so the closing axis is
+        PERPENDICULAR to the object's longest horizontal axis (jaws grip across
+        the object's length).
 
         Uses _grasp_R() (Y-tilt included) as base so IK behaviour matches
         other tasks (stack_cups, drawer).  Only applied when the object is
@@ -1060,18 +1082,32 @@ class MotionPlanner():
         """
         base_R = cls._grasp_R()
         if obb is None:
+            log.info("[MotionPlanner] Long-axis grasp SKIPPED: obb is None")
             return base_R
 
         extents = obb["extents"]
-        if extents[1] < 1e-6 or extents[0] / extents[1] < 1.5:
-            return base_R  # not elongated enough
-
-        # First principal axis = long axis (largest eigenvalue from fit_obb_pca)
         long_axis = obb["R"][:, 0]
-        lx, ly = float(long_axis[0]), float(long_axis[1])
+        lx, ly, lz = float(long_axis[0]), float(long_axis[1]), float(long_axis[2])
+        aspect = extents[0] / extents[1] if extents[1] > 1e-6 else float("inf")
+        log.info(
+            f"[MotionPlanner] OBB extents=({extents[0]:.3f}, {extents[1]:.3f}, "
+            f"{extents[2]:.3f}) aspect={aspect:.2f} long_axis=({lx:+.2f}, "
+            f"{ly:+.2f}, {lz:+.2f}) hypot_xy={np.hypot(lx, ly):.2f}"
+        )
+
+        if extents[1] < 1e-6 or aspect < 1.5:
+            log.info(
+                f"[MotionPlanner] Long-axis grasp SKIPPED: aspect {aspect:.2f} "
+                f"< 1.5 (not elongated enough)"
+            )
+            return base_R
 
         if np.hypot(lx, ly) < 0.15:
-            return base_R  # long axis is mostly vertical — no yaw adjustment
+            log.info(
+                f"[MotionPlanner] Long-axis grasp SKIPPED: long axis nearly "
+                f"vertical (hypot_xy={np.hypot(lx, ly):.2f} < 0.15)"
+            )
+            return base_R
 
         # Normalize to [-pi/2, pi/2] (long axis is bipolar)
         theta = np.arctan2(ly, lx)
@@ -1080,8 +1116,11 @@ class MotionPlanner():
         elif theta < -np.pi / 2:
             theta += np.pi
 
-        # Rotate base_R around world-Z by delta = theta so closing axis aligns
-        # with the long axis.  delta in [-pi/2, pi/2] guarantees shortest path (≤90°).
+        # Rotate base_R around world-Z by delta = theta. Because base closing
+        # axis (gripper Y) is world +Y, the resulting Y column = (-sin θ, cos θ, 0)
+        # which is perpendicular to the long axis (cos θ, sin θ, 0). Jaws then
+        # close ACROSS the object's length. delta in [-π/2, π/2] guarantees
+        # shortest wrist path (≤90°).
         delta = theta
 
         c, s = np.cos(delta), np.sin(delta)

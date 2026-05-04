@@ -1,4 +1,4 @@
 name: periodic
 method: Periodic
-period: 10
+period: 6
 max_fail_count: 5

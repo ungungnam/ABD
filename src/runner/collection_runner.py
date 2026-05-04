@@ -27,6 +27,7 @@ from vlm_client.factory import build_vlm_backend
 from policy.base_policy import BaseResetPolicy
 from policy.no_reset_policy import NoResetPolicy
 from policy.periodic_policy import PeriodicPolicy
+from policy.single_vqa_policy import SingleVQAPolicy
 from policy.naive_policy import NaivePolicy
 from policy.vlm_checklist_policy import VLMChecklistPolicy
 from metrics.metrics_logger import MetricsLogger, EpisodeRecord, InterventionRecord
@@ -78,6 +79,17 @@ def build_policy(
             tau_reset=config.policy.tau_reset,
             use_cache=getattr(config.policy, "use_cache", False),
             version=getattr(config.policy, "version", ""),
+        )
+    elif method == "SingleVQA":
+        if vqa_client is None:
+            raise ValueError(
+                "SingleVQA policy requires a VQA client; this is not "
+                "available in the dummy environment."
+            )
+        return SingleVQAPolicy(
+            vqa_client=vqa_client,
+            question=getattr(config.policy, "question", ""),
+            reference_dir=getattr(config.policy, "reference_dir", ""),
         )
     else:
         raise ValueError(f"Unknown policy method: {method}")
@@ -307,7 +319,11 @@ class CollectionRunner:
                         task.task_type == "stack_cups"
                         and not self.task_scheduler.is_terminal_step
                     )
-                    _route_to_vlm = not self.is_dummy and (_is_perception_failure or _is_intermediate_stack)
+                    _route_to_vlm = not self.is_dummy and (
+                        _is_perception_failure
+                        or _is_intermediate_stack
+                        or self.policy_method in ("periodic", "single_vqa")
+                    )
                     if _route_to_vlm:
                         log.info(
                             f"[GenFailure] reason={_reason} at {task.name} — "
@@ -346,8 +362,6 @@ class CollectionRunner:
                             episode_duration=reset_confirm_time - episode_start_time,
                             reset_prompt_to_confirm=reset_confirm_time - reset_decided_at,
                         )
-                        if not self.is_dummy and task.task_type == "stack_cups":
-                            record.ground_truth_reset = self.human_interface.request_ground_truth_label()
                         self.metrics.log_episode(record)
                         self.metrics.log_intervention(InterventionRecord(
                             timestamp=reset_decided_at,
@@ -433,6 +447,36 @@ class CollectionRunner:
                         detection_info = self._stack_cups_prev_detection
                         self._stack_cups_prev_detection = {}
 
+                    # Augment detection_info with object world-frame positions and the
+                    # robot's reachable workspace bounds, so reset/checklist policies
+                    # can reason about reachability.
+                    if detection_info is None:
+                        detection_info = {}
+                    positions = {}
+                    mp = getattr(self.generator, "motion_planner", None)
+                    if mp is not None and task.task_type == "stack_cups":
+                        cs = task.canonical_state or {}
+                        tag_to_name = {
+                            task.pick_tag_id: f"{cs.get('pick', 'pick')} cup"
+                            if task.pick_tag_id is not None else None,
+                            task.place_tag_id: f"{cs.get('place', 'place')} cup"
+                            if task.place_tag_id is not None else None,
+                        }
+                        for tag_id, name in tag_to_name.items():
+                            if tag_id is None or name is None:
+                                continue
+                            T = mp._tag_position_cache.get(tag_id)
+                            if T is not None:
+                                positions[name] = tuple(T[:3, 3].round(3).tolist())
+                    if positions:
+                        detection_info["__object_positions__"] = positions
+                    wb = getattr(getattr(self.env, "config", None), "workspace_bounds", None)
+                    if wb is not None:
+                        detection_info["__workspace_bounds__"] = {
+                            "x_min": float(wb.x_min), "x_max": float(wb.x_max),
+                            "y_min": float(wb.y_min), "y_max": float(wb.y_max),
+                        }
+
                     # VLMChecklistPolicy: checklist handles both success detection and
                     # reset decision via success_item-flagged questions.
                     # Other policies: fall back to VLMValidator for success.
@@ -470,6 +514,21 @@ class CollectionRunner:
                                 success=True, confidence=0.5, method="dummy", details={}
                             )
                         success = validation.success
+                        # For policies that compare against a reference initial-state
+                        # image (e.g. SingleVQA), tell the policy which task is up next.
+                        if success:
+                            _next_task = self.task_scheduler.next_task()
+                        else:
+                            _next_task = task
+                        if _next_task.task_type == "stack_cups":
+                            _next_key = (
+                                "stack_cups_forward"
+                                if _next_task.stack_step.startswith("forward")
+                                else "stack_cups_reverse"
+                            )
+                        else:
+                            _next_key = _next_task.name
+                        detection_info["__next_task_key__"] = _next_key
                         checklist_reset = self.policy.needs_reset(
                             validation=validation,
                             fail_count=fail_count,
@@ -479,7 +538,7 @@ class CollectionRunner:
                             detection_info=detection_info,
                         )
                         checklist_eval = getattr(self.policy, "last_eval", None)
-                        reset_needed = checklist_reset if checklist_eval is not None else validation.needs_reset
+                        reset_needed = checklist_reset
 
                     if success and not reset_needed:
                         decision = "next"
@@ -560,7 +619,7 @@ class CollectionRunner:
                     fail_count += 1
                     self.task_scheduler.reset_to_phase_start()
                     log.info(f"[Retry] reset to phase start (step={self.task_scheduler._idx}), fail_count={fail_count}")
-                    if fail_count >= self.max_retries:
+                    if fail_count >= self.max_retries and self.policy_method not in ("periodic", "single_vqa"):
                         log.warning(f"Max retries ({self.max_retries}) reached, escalating to reset.")
                         decision = "reset"
                         record.policy_decision = "reset"

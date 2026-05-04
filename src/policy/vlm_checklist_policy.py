@@ -121,16 +121,27 @@ class VLMChecklistPolicy(BaseResetPolicy):
 
         reset = score < self.tau_reset
 
+        weighted_sum = sum(it["contrib"] for it in per_item)
+        weight_total = sum(abs(it["weight"]) for it in per_item)
+
+        log.info("=" * 88)
         log.info(
-            f"[VLMChecklistPolicy] task={task.name} | score={score:.3f} | tau={self.tau_reset} | "
-            f"needs_reset={reset} | success={success}"
+            f"[VLMChecklistPolicy] task={task.name} | success={success} | "
+            f"needs_reset={reset} (score {score:.3f} {'<' if reset else '>='} tau {self.tau_reset})"
         )
+        log.info(
+            f"  formula: score = Σ(w·answer) / Σ|w| = {weighted_sum:.3f} / {weight_total:.3f} = {score:.3f}"
+        )
+        log.info(f"  {'':<2}{'phase':<8}{'id':>3}  {'ans':<3}  {'weight':>7}  {'contrib':>8}   question")
+        log.info(f"  {'-' * 84}")
         for item in per_item:
             marker = "★" if item.get("success_item") else " "
-            phase = f"[{item.get('phase', 'current')}]"
+            phase = item.get("phase", "current")
             log.info(
-                f"  {marker}{phase}[{item['answer'].upper():3s}] (w={item['weight']:.2f}) {item['question']}"
+                f"  {marker} {phase:<8}{item['id']:>3}  {item['answer']:<3}  "
+                f"{item['weight']:>+7.2f}  {item['contrib']:>+8.3f}   {item['question']}"
             )
+        log.info("=" * 88)
 
         return reset
 
@@ -249,16 +260,18 @@ class VLMChecklistPolicy(BaseResetPolicy):
             preamble = _CHECKLIST_PREAMBLE
             obs = observation
 
-        detection_block = ""
-        if detection_info:
-            det_lines = " / ".join(
-                f"{obj}: {status}" for obj, status in detection_info.items()
-            )
-            detection_block = f"\nObject detection status: {det_lines}\n"
-            log.info(f"[VLMChecklistPolicy] task={task.name} | detection:{detection_block.strip()}")
+        info = detection_info or {}
+        positions = info.get("__object_positions__") or {}
+        bounds = info.get("__workspace_bounds__") or {}
+        det_status = {k: v for k, v in info.items() if not k.startswith("__")}
 
-        # ---- Phase 1: common + current_task ---- #
-        items_p1 = checklist["common"] + checklist["current_task"]
+        detection_block = self._build_context_block(det_status, positions, bounds)
+        if detection_block:
+            log.info(f"[VLMChecklistPolicy] task={task.name} | context:\n{detection_block.strip()}")
+
+        # ---- Phase 1: common + current_task (+ dynamic reachability items) ---- #
+        reach_items = self._build_reachability_items(positions, bounds)
+        items_p1 = checklist["common"] + checklist["current_task"] + reach_items
         answers_p1 = self._ask_vlm(items_p1, preamble, detection_block, obs, task)
 
         success_answers = [
@@ -296,6 +309,51 @@ class VLMChecklistPolicy(BaseResetPolicy):
         # ---- Score ---- #
         score, per_item = self._compute_score(items_p1, answers_p1, items_p2, answers_p2)
         return score, per_item, success
+
+    @staticmethod
+    def _build_context_block(det_status: dict, positions: dict, bounds: dict) -> str:
+        """Build the prompt context block with detection / position / bounds info."""
+        lines = []
+        if det_status:
+            det_str = " / ".join(f"{k}: {v}" for k, v in det_status.items())
+            lines.append(f"Object detection status: {det_str}")
+        if positions:
+            pos_str = " / ".join(
+                f"{name} at (x={p[0]:.3f}, y={p[1]:.3f}, z={p[2]:.3f})"
+                for name, p in positions.items()
+            )
+            lines.append(f"Current object positions (world frame, meters): {pos_str}")
+        if bounds:
+            lines.append(
+                "Robot reachable workspace bounds (world frame, meters): "
+                f"x in [{bounds.get('x_min', '?'):.2f}, {bounds.get('x_max', '?'):.2f}], "
+                f"y in [{bounds.get('y_min', '?'):.2f}, {bounds.get('y_max', '?'):.2f}]"
+            )
+        if not lines:
+            return ""
+        return "\n" + "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _build_reachability_items(positions: dict, bounds: dict) -> List[dict]:
+        """Generate one yes/no checklist item per detected object asking whether
+        the object is currently inside the robot's reachable workspace.
+        IDs use a high range (10000+) to avoid colliding with hand-edited items.
+        Items are non-success_item (do not affect success), default weight 0.3.
+        """
+        if not positions or not bounds:
+            return []
+        items: List[dict] = []
+        for offset, (name, _) in enumerate(positions.items()):
+            items.append({
+                "id": 10000 + offset,
+                "question": (
+                    f"Is the {name} (see 'Current object positions' above) "
+                    f"located within the robot's reachable workspace bounds "
+                    f"(see 'Robot reachable workspace bounds' above)?"
+                ),
+                "weight": 0.3,
+            })
+        return items
 
     def _ask_vlm(
         self,
@@ -347,9 +405,10 @@ class VLMChecklistPolicy(BaseResetPolicy):
                 in_reset_group = item.get("reset_group") is not None
 
                 if in_reset_group:
-                    weighted_sum += abs(w) * (0.0 if in_mixed_group else 1.0)
+                    contrib = abs(w) * (0.0 if in_mixed_group else 1.0)
                 else:
-                    weighted_sum += w * (1.0 if yes else 0.0)
+                    contrib = w * (1.0 if yes else 0.0)
+                weighted_sum += contrib
                 weight_total += abs(w)
 
                 per_item.append(
@@ -358,6 +417,7 @@ class VLMChecklistPolicy(BaseResetPolicy):
                         "question": item["question"],
                         "weight": item["weight"],
                         "answer": ans,
+                        "contrib": contrib,
                         "success_item": is_success_item,
                         "success_answer": success_answer,
                         "phase": phase_tag,

@@ -1,0 +1,15 @@
+name: single_vqa
+method: SingleVQA
+max_fail_count: 5
+
+# Directory containing reference initial-state images for each task pair.
+# Filename convention: {key}_initial.{jpg,png,jpeg}
+#   stack_cups: stack_cups_forward_initial.jpg / stack_cups_reverse_initial.jpg
+#   others:     {task_name}_initial.jpg  (e.g. banana_to_pan_initial.jpg)
+# Leave empty to disable reference-image comparison.
+reference_dir: ${hydra:runtime.cwd}/config/reference_images
+
+# Yes/no question shown to the VLM. Empty = use built-in default that asks
+# whether human reset is required given detection status, object positions
+# vs workspace bounds, and (when available) a reference initial-state image.
+question: ""
