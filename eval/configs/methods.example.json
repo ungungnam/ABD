@@ -1,0 +1,31 @@
+{
+  "_comment": "Per-method kwargs forwarded to each method constructor. Pass with: python eval/run_eval.py --methods ... --method-config eval/configs/methods.example.json. Backend is one of gpt|aha|qwen; gpt reads OPENAI_API_KEY, aha/qwen need their local inference server (see scripts/run_aha_server.py / run_qwen_server.py).",
+
+  "abd_checklist": {
+    "backend": "gpt",
+    "model": "gpt-4.1",
+    "tau_reset": 0.9,
+    "version": ""
+  },
+
+  "single_vqa": {
+    "backend": "gpt",
+    "model": "gpt-4.1"
+  },
+
+  "zero_shot_vlm": {
+    "backend": "gpt",
+    "model": "gpt-4.1"
+  },
+
+  "code_as_monitor": {
+    "backend": "gpt",
+    "model": "gpt-4.1",
+    "cache_dir": "/result/reset_vqa_eval/cam_cache"
+  },
+
+  "random": {
+    "p": 0.5,
+    "seed": 0
+  }
+}
