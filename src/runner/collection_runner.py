@@ -30,6 +30,8 @@ from policy.periodic_policy import PeriodicPolicy
 from policy.single_vqa_policy import SingleVQAPolicy
 from policy.naive_policy import NaivePolicy
 from policy.vlm_checklist_policy import VLMChecklistPolicy
+from policy.backward_only_policy import BackwardOnlyPolicy
+from policy.forward_only_policy import ForwardOnlyPolicy
 from metrics.metrics_logger import MetricsLogger, EpisodeRecord, InterventionRecord
 from metrics.failure_classifier import FailureClassifier
 from metrics.dataset_manifest import DatasetManifest
@@ -53,6 +55,8 @@ _POLICY_SUBDIR = {
     "no_reset":   "no_reset",
     "naive":      "naive",
     "vlm_checklist": "vlm_checklist",
+    "abd_backward_only": "abd_backward_only",
+    "abd_forward_only": "abd_forward_only",
 }
 
 
@@ -91,6 +95,32 @@ def build_policy(
                 "available in the dummy environment."
             )
         return VLMChecklistPolicy(
+            vqa_client=vqa_client,
+            checklist_dir=config.policy.checklist_dir,
+            tau_reset=config.policy.tau_reset,
+            use_cache=getattr(config.policy, "use_cache", False),
+            version=getattr(config.policy, "version", ""),
+        )
+    elif method == "ABDBackwardOnly":
+        if vqa_client is None:
+            raise ValueError(
+                "ABDBackwardOnly policy requires a VQA client; this is not "
+                "available in the dummy environment."
+            )
+        return BackwardOnlyPolicy(
+            vqa_client=vqa_client,
+            checklist_dir=config.policy.checklist_dir,
+            tau_reset=config.policy.tau_reset,
+            use_cache=getattr(config.policy, "use_cache", False),
+            version=getattr(config.policy, "version", ""),
+        )
+    elif method == "ABDForwardOnly":
+        if vqa_client is None:
+            raise ValueError(
+                "ABDForwardOnly policy requires a VQA client; this is not "
+                "available in the dummy environment."
+            )
+        return ForwardOnlyPolicy(
             vqa_client=vqa_client,
             checklist_dir=config.policy.checklist_dir,
             tau_reset=config.policy.tau_reset,

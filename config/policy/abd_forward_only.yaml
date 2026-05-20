@@ -1,0 +1,9 @@
+name: abd_forward_only
+method: ABDForwardOnly
+
+checklist_dir: ${hydra:runtime.cwd}/config/checklists
+
+tau_reset: 0.9
+max_fail_count: 5
+use_cache: false
+version: ""
