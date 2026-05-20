@@ -13,7 +13,7 @@ perception:
 motion_planner:
   smoothing: true
 
-max_episodes: 100
+max_episodes: 1000
 max_retries: 3
 seed: 0
 

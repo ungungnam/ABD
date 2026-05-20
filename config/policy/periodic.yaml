@@ -1,4 +1,12 @@
 name: periodic
 method: Periodic
-period: 6
+period: 4
 max_fail_count: 5
+
+# Operator-controlled fast-forward: after each episode the runner briefly polls
+# stdin, and if `skip_key` is pressed the remaining episodes in the current
+# reset period are skipped (a human reset is requested immediately).
+# 'k' is the default because some keys ('s' especially) trigger editor
+# shortcuts when running inside a VSCode integrated terminal.
+skip_key: "k"
+skip_timeout: 3.0

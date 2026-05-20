@@ -21,6 +21,40 @@ log = logging.getLogger(__name__)
 class HumanResetInterface:
     """Terminal-based human reset prompt."""
 
+    def poll_skip_key(self, skip_key: str = "s", timeout: float = 1.0) -> bool:
+        """Briefly poll stdin for a single skip-key press.
+
+        Args:
+            skip_key: character that triggers the skip (case-insensitive).
+            timeout:  seconds to wait for the keypress.
+
+        Returns:
+            True if the matching key was pressed within ``timeout`` seconds,
+            False otherwise. Non-matching keys consumed during the window are
+            discarded (terminal is briefly put in cbreak mode).
+        """
+        if not sys.stdin.isatty():
+            return False
+        sys.stdout.write(
+            f"  [Skip] Press '{skip_key}' within {timeout:.1f}s to skip "
+            f"the rest of this reset period... "
+        )
+        sys.stdout.flush()
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            r, _, _ = select.select([sys.stdin], [], [], timeout)
+            if r:
+                ch = sys.stdin.read(1)
+                if ch.lower() == skip_key.lower():
+                    print("SKIP")
+                    return True
+            print()
+            return False
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
     def request_ground_truth_success_label(self, policy_success: bool) -> int:
         """Ask the operator to label the validator's success decision vs. ground truth.
 

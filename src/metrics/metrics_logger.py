@@ -37,6 +37,10 @@ class EpisodeRecord:
     # --- timing (all durations in seconds) ---
     episode_duration: Optional[float] = None       # total episode time (includes human reset wait if any)
     reset_prompt_to_confirm: Optional[float] = None    # time human took to confirm reset
+    # --- periodic policy user-skip ---
+    user_skipped: bool = False                     # operator pressed skip key during this episode
+    skipped_episodes: int = 0                      # # of remaining-period episodes fast-forwarded
+    skipped_time_s: float = 0.0                    # estimated wall-clock saved by the fast-forward
 
 
 @dataclass
@@ -98,8 +102,11 @@ class MetricsLogger:
         return sum(1 for e in self.episodes if not e.generation_success)
 
     def cumulative_execution_attempts(self) -> int:
-        """Episodes that reached execution (gen succeeded)."""
-        return sum(1 for e in self.episodes if e.generation_success)
+        """Episodes that reached execution (gen succeeded), plus operator-skipped
+        episodes counted as virtual attempts so they contribute to throughput stats."""
+        real = sum(1 for e in self.episodes if e.generation_success)
+        skipped = sum(int(getattr(e, "skipped_episodes", 0) or 0) for e in self.episodes)
+        return real + skipped
 
     def interventions_per_hour(self) -> float:
         if self.start_time is None or not self.episodes:

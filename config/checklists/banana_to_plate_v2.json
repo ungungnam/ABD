@@ -10,7 +10,8 @@
     {"id": 1, "question": "Is the robot arm and gripper visibly intact (no broken parts, no hanging cables, no obvious damage)?", "weight": 0.15},
     {"id": 2, "question": "Is the work area clear of task objects that have fallen on the floor or far outside the working surface?", "weight": 0.15},
     {"id": 3, "question": "Is the banana clearly visible somewhere in the scene (across the available views)?", "weight": 0.3},
-    {"id": 4, "question": "Are objects on the table upright and stable, with nothing knocked over or spilled?", "weight": 0.2}
+    {"id": 4, "question": "Are objects on the table upright and stable, with nothing knocked over or spilled?", "weight": 0.2},
+    {"id": 11, "question": "Are the pan and the plate placed separately on the table, without overlapping each other or being stacked on top of one another?", "weight": 0.4}
   ],
   "current_task": [
     {"id": 5, "question": "Is the banana currently placed on the plate?", "weight": 0.6, "success_item": true},

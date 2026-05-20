@@ -25,6 +25,9 @@ class MotionPlanner():
         self.last_drawer_tag_pose: Optional[np.ndarray] = None
         self.last_drawer_rotation_deg: Optional[float] = None
         self._drawer_ref_yaw: Optional[float] = None  # atan2 yaw at init pose before execution
+        # Last detected world XYZ from pick_place perception (None until first plan).
+        self.last_pick_position: Optional[Tuple[float, float, float]] = None
+        self.last_place_position: Optional[Tuple[float, float, float]] = None
 
     @classmethod
     def _make_default_tag_cache(cls) -> dict:
@@ -98,6 +101,14 @@ class MotionPlanner():
     def plan_pick_place(self, pick_perception, place_perception, vlm_action=None, place_offset=None, place_bowl_center_xy=False):
         pick_grasp_pose  = self._get_best_grasp_pose_from_perception(pick_perception,  hover_offset=0.05)
         place_grasp_pose = self._get_best_grasp_pose_from_perception(place_perception, hover_offset=0.05, use_median_xy=place_bowl_center_xy)
+        # Cache last detected world XYZ for downstream observers (collection_runner
+        # injects these into the policy prompt as object positions). Keep the
+        # previous value when a fresh detection is unavailable, so policies still
+        # see the most recent known position.
+        if pick_grasp_pose is not None:
+            self.last_pick_position = tuple(pick_grasp_pose["T_wg"][:3, 3].tolist())
+        if place_grasp_pose is not None:
+            self.last_place_position = tuple(place_grasp_pose["T_wg"][:3, 3].tolist())
         if place_grasp_pose is not None:
             # Force place orientation to base _grasp_R() so the held object
             # always ends up along world X (closing axis = world Y) regardless
@@ -708,13 +719,18 @@ class MotionPlanner():
         if place_xy_offset:
             # Unstack: pick cup is on top — average across all cameras that see it.
             solo_picks: List[np.ndarray] = []
-            for camera in self.cameras.values():
+            solo_pick_cams: List[str] = []
+            for name, camera in self.cameras.items():
                 tp = detect_single_tag_world_pose(camera, pick_tag_id)
                 if tp is not None:
                     solo_picks.append(tp)
+                    solo_pick_cams.append(name)
             if solo_picks:
                 T_pick_wt = self._average_tag_poses(solo_picks)
-                log.info(f"[StackCups] Pick tag detected by {len(solo_picks)} camera(s) (reverse) — averaged pose")
+                log.info(
+                    f"[StackCups] Pick tag detected by {len(solo_picks)} camera(s) "
+                    f"{solo_pick_cams} (reverse) — averaged pose"
+                )
             else:
                 T_pick_wt = detect_tag_world_pose_stereo(self.cameras, pick_tag_id)
 
@@ -726,18 +742,26 @@ class MotionPlanner():
             # Stack: scan all cameras and categorise detections.
             both_picks: List[np.ndarray] = []   # T_pick  from cameras seeing BOTH tags
             both_places: List[np.ndarray] = []  # T_place from cameras seeing BOTH tags
+            both_cams: List[str] = []
             solo_picks: List[np.ndarray] = []   # T_pick  from cameras seeing pick only
             solo_places: List[np.ndarray] = []  # T_place from cameras seeing place only
+            solo_pick_cams: List[str] = []
+            solo_place_cams: List[str] = []
 
-            for camera in self.cameras.values():
+            for name, camera in self.cameras.items():
                 tp  = detect_single_tag_world_pose(camera, pick_tag_id)
                 tpl = detect_single_tag_world_pose(camera, place_tag_id)
                 if tp is not None and tpl is not None:
                     both_picks.append(tp)
                     both_places.append(tpl)
+                    both_cams.append(name)
                 else:
-                    if tp  is not None: solo_picks.append(tp)
-                    if tpl is not None: solo_places.append(tpl)
+                    if tp  is not None:
+                        solo_picks.append(tp)
+                        solo_pick_cams.append(name)
+                    if tpl is not None:
+                        solo_places.append(tpl)
+                        solo_place_cams.append(name)
 
             if both_picks:
                 # Priority 1: average across all cameras seeing both tags
@@ -745,19 +769,25 @@ class MotionPlanner():
                 T_place_wt = self._average_tag_poses(both_places)
                 log.info(
                     f"[StackCups] Both tags visible in {len(both_picks)} camera(s) "
-                    f"— averaged pick/place pose"
+                    f"{both_cams} — averaged pick/place pose"
                 )
             else:
                 # Priority 2: use per-tag cameras independently
                 if solo_picks:
                     T_pick_wt = self._average_tag_poses(solo_picks)
-                    log.info(f"[StackCups] Pick tag detected by {len(solo_picks)} camera(s) (solo)")
+                    log.info(
+                        f"[StackCups] Pick tag detected by {len(solo_picks)} camera(s) "
+                        f"{solo_pick_cams} (solo)"
+                    )
                 else:
                     T_pick_wt = detect_tag_world_pose_stereo(self.cameras, pick_tag_id)
 
                 if solo_places:
                     T_place_wt = self._average_tag_poses(solo_places)
-                    log.info(f"[StackCups] Place tag detected by {len(solo_places)} camera(s) (solo)")
+                    log.info(
+                        f"[StackCups] Place tag detected by {len(solo_places)} camera(s) "
+                        f"{solo_place_cams} (solo)"
+                    )
                 else:
                     T_place_wt = detect_tag_world_pose_stereo(self.cameras, place_tag_id)
 
@@ -837,7 +867,9 @@ class MotionPlanner():
 
         if T_wt is None or avg_normal is None:
             log.warning(f"[MotionPlanner] AprilTag {tag_id} not found for drawer task.")
-            self.last_drawer_tag_pose = None
+            # Keep the last successfully-detected pose so downstream observers
+            # (e.g. policy prompt) can still reference it as the most recent
+            # known position.
             return None, None
 
         log.info(f"[Drawer] Tag detected by {len(detections)} camera(s) for trajectory planning")
@@ -855,16 +887,16 @@ class MotionPlanner():
         T_place[:3, :3] = R
 
         if action == "open":
-            # Pick: grasp closed handle, shift 1 cm toward robot (-X)
-            T_pick[:3, 3] = p_handle + np.array([-0.01, 0.0, 0.0])
-            # Place: pull -X by a random distance in [6 cm, 9 cm]
+            # Pick: grasp closed handle, shift 1 cm toward robot (-X), 2 cm lower Z
+            T_pick[:3, 3] = p_handle + np.array([-0.01, 0.0, -0.02])
+            # Place: pull -X by a random distance in [6 cm, 9 cm], 2 cm lower Z
             pull_dist = np.random.uniform(0.07, 0.11)
-            T_place[:3, 3] = p_handle + np.array([-pull_dist, 0.0, 0.0])
+            T_place[:3, 3] = p_handle + np.array([-pull_dist, 0.0, -0.02])
         else:
-            # Pick: open handle position (closed handle - pull_dist), -1cm X buffer, -3cm Z
-            T_pick[:3, 3] = p_handle + np.array([-self._DRAWER_PULL_DIST, 0.0, -0.03])
+            # Pick: open handle position (closed handle - pull_dist), -1cm X buffer, -4cm Z
+            T_pick[:3, 3] = p_handle + np.array([-self._DRAWER_PULL_DIST, 0.0, -0.04])
             # Place: tag-derived closed handle X, Y/Z same as pick
-            T_place[:3, 3] = np.array([p_handle[0], p_handle[1], p_handle[2] - 0.03])
+            T_place[:3, 3] = np.array([p_handle[0], p_handle[1], p_handle[2] - 0.04])
 
         pre_T_pick = T_pick.copy()
         pre_T_pick[:3, 3] = T_pick[:3, 3] + np.array([-0.05, 0.0, 0.0])

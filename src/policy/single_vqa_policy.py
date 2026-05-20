@@ -121,16 +121,40 @@ class SingleVQAPolicy(BaseResetPolicy):
 
     @staticmethod
     def _build_context_block(det_status: dict, positions: dict, bounds: dict) -> str:
+        """Inline each object's last-detected world position with its detection
+        status; fall back to a separate line for positions that have no matching
+        detection entry."""
+        def _pos_for(name: str):
+            if name in positions:
+                return positions[name]
+            base = re.sub(r"\s*\([^)]*\)\s*$", "", name).strip()
+            return positions.get(base)
+
         lines = []
+        consumed_pos_keys: set = set()
         if det_status:
-            det_str = " / ".join(f"{k}: {v}" for k, v in det_status.items())
-            lines.append(f"Object detection status: {det_str}")
-        if positions:
+            parts = []
+            for k, v in det_status.items():
+                is_detected = str(v).strip().lower() == "detected"
+                pos = _pos_for(k) if is_detected else None
+                if pos is not None:
+                    parts.append(
+                        f"{k}: {v} at (x={pos[0]:.3f}, y={pos[1]:.3f}, z={pos[2]:.3f})"
+                    )
+                    consumed_pos_keys.add(k)
+                    base = re.sub(r"\s*\([^)]*\)\s*$", "", k).strip()
+                    consumed_pos_keys.add(base)
+                else:
+                    parts.append(f"{k}: {v}")
+            lines.append("Object detection status: " + " / ".join(parts))
+
+        leftover = {n: p for n, p in positions.items() if n not in consumed_pos_keys}
+        if leftover:
             pos_str = " / ".join(
                 f"{name} at (x={p[0]:.3f}, y={p[1]:.3f}, z={p[2]:.3f})"
-                for name, p in positions.items()
+                for name, p in leftover.items()
             )
-            lines.append(f"Current object positions (world frame, meters): {pos_str}")
+            lines.append(f"Other object positions (world frame, meters): {pos_str}")
         if bounds:
             lines.append(
                 "Robot reachable workspace bounds (world frame, meters): "

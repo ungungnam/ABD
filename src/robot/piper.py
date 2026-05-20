@@ -19,6 +19,11 @@ class Piper:
             [0, 0, 1, 0.136],
             [0, 0, 0, 1],
         ])
+        # When input_frame == "tip", step() interprets the first six entries of
+        # the incoming pose as the gripper-tip pose (in world frame) and
+        # converts back to EE before sending to the arm. Default "ee" preserves
+        # existing behavior.
+        self._input_frame = getattr(config, "input_frame", "ee")
         self._gripper_effort = 1000  # default effort (pick_place); stack_cups uses 300
 
     def _lazy_init(self, set_to_zero=True):
@@ -37,11 +42,28 @@ class Piper:
         )
 
     def step(self, pose_6d, gripper):
+        pose_6d = list(pose_6d)
+        if self._input_frame == "tip":
+            pose_6d = self._tip_to_ee(pose_6d)
         end_pose = [int(x) for x in pose_6d] + [int(gripper)]
         self._control_end_pose(
             end_pose
         )
         time.sleep(0.2)
+
+    def _tip_to_ee(self, pose_6d_tip):
+        """Convert a tip-frame pose (raw Piper units) to EE-frame pose.
+
+        Orientation is preserved (T_eg is a pure +Z translation in the EE
+        frame); only translation shifts by -R_tip @ [0, 0, 0.136].
+        """
+        x, y, z, rx, ry, rz = [float(v) for v in pose_6d_tip[:6]]
+        pose_si = [x * 1e-6, y * 1e-6, z * 1e-6,
+                   rx * 1e-3, ry * 1e-3, rz * 1e-3]
+        T_wg = pose6d_to_transform_matrix(pose_si, degrees=True)
+        offset_world = T_wg[:3, :3] @ np.array([0.0, 0.0, self.T_eg[2, 3]])
+        p_ee = T_wg[:3, 3] - offset_world
+        return [p_ee[0] * 1e6, p_ee[1] * 1e6, p_ee[2] * 1e6, rx, ry, rz]
 
     def go_to_init_pose(self):
         self._control_end_pose(self._init_pose)

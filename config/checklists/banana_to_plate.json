@@ -21,9 +21,9 @@
       "weight": 0.3
     },
     {
-      "id": 5,
-      "question": "Is the banana within the robot's reachable workspace?",
-      "weight": 0.3
+      "id": 15,
+      "question": "Are the pan and the plate placed separately on the table, without overlapping each other or being stacked on top of one another?",
+      "weight": 0.4
     }
   ],
   "current_task": [
@@ -56,19 +56,9 @@
       "weight": 0.3
     },
     {
-      "id": 11,
-      "question": "Is the plate within the robot's reachable workspace?",
-      "weight": 0.3
-    },
-    {
       "id": 12,
-      "question": "Is the plate unobstructed and accessible for placing the banana?",
-      "weight": 0.2
-    },
-    {
-      "id": 13,
-      "question": "Is there sufficient free space around the plate to place the banana without collision?",
-      "weight": 0.2
+      "question": "Is the plate unobstructed with sufficient free space around it for placement?",
+      "weight": 0.3
     },
     {
       "id": 14,

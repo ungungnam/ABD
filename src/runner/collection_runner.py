@@ -39,6 +39,23 @@ from dataset.dataset_recorder import DatasetRecorder
 log = logging.getLogger(__name__)
 
 
+# Dataset folder layout: <root>/<task_subdir>/<policy_subdir>/run_<id>/
+# Maps mirror existing dir names under data/abd_data/.
+_TASK_SUBDIR = {
+    "pick_place_reversible": "pick_and_place",
+    "open_drawer":            "open_drawer",
+    "stack_cups":             "stack_cups",
+}
+_POLICY_SUBDIR = {
+    "abd":        "ABD",
+    "periodic":   "Periodic",
+    "single_vqa": "single_VQA",
+    "no_reset":   "no_reset",
+    "naive":      "naive",
+    "vlm_checklist": "vlm_checklist",
+}
+
+
 def build_env(config: DictConfig) -> ABDBaseEnv:
     """Build the appropriate environment from config."""
     if config.env.name == "real":
@@ -107,9 +124,20 @@ class CollectionRunner:
         self.max_retries = config.max_retries
         self.is_dummy = config.env.name == "dummy"
 
-        # Run identity (must be set before DatasetRecorder)
-        self.run_id = self._make_run_id(config)
         self.policy_method = config.policy.name
+
+        # Resolve dataset target directory first so the run_id can be checked
+        # for collision against the actual <root>/<task>/<policy>/ subtree.
+        task_family = config.task.family
+        policy_name = config.policy.name
+        task_subdir = _TASK_SUBDIR.get(task_family, task_family)
+        policy_subdir = _POLICY_SUBDIR.get(policy_name, policy_name)
+        target_parent = None
+        if hasattr(config, "dataset_recorder") and not self.is_dummy:
+            target_parent = Path(config.dataset_recorder.root) / task_subdir / policy_subdir
+
+        # Run identity (must be set before DatasetRecorder)
+        self.run_id = self._make_run_id(config, target_parent=target_parent)
 
         # Environment
         self.env = build_env(config)
@@ -131,7 +159,15 @@ class CollectionRunner:
             log.warning("[DatasetRecorder] 'dataset_recorder' key missing from config — recording disabled.")
         else:
             try:
-                self.dataset_recorder = DatasetRecorder(config.dataset_recorder, run_id=self.run_id)
+                policy_params = OmegaConf.to_container(config.policy, resolve=True)
+                self.dataset_recorder = DatasetRecorder(
+                    config.dataset_recorder,
+                    run_id=self.run_id,
+                    policy_method=self.policy_method,
+                    task_subdir=task_subdir,
+                    policy_subdir=policy_subdir,
+                    policy_params=policy_params,
+                )
             except Exception as e:
                 log.warning(f"Dataset recorder init failed: {e}. Recording disabled.")
 
@@ -322,7 +358,7 @@ class CollectionRunner:
                     _route_to_vlm = not self.is_dummy and (
                         _is_perception_failure
                         or _is_intermediate_stack
-                        or self.policy_method in ("periodic", "single_vqa")
+                        or self.policy_method in ("periodic", "single_vqa", "no_reset")
                     )
                     if _route_to_vlm:
                         log.info(
@@ -468,6 +504,26 @@ class CollectionRunner:
                             T = mp._tag_position_cache.get(tag_id)
                             if T is not None:
                                 positions[name] = tuple(T[:3, 3].round(3).tolist())
+                    elif mp is not None and task.task_type == "pick_place":
+                        # Names match _build_detection_info keys ("{obj} (pick)" / "{obj} (place)").
+                        m = gen_result.metadata
+                        pick_obj = m.get("pick_object") or (task.canonical_state or {}).get("object")
+                        place_obj = m.get("place_object") or (task.canonical_state or {}).get("target")
+                        if pick_obj and getattr(mp, "last_pick_position", None) is not None:
+                            positions[f"{pick_obj} (pick)"] = tuple(
+                                round(v, 3) for v in mp.last_pick_position
+                            )
+                        if place_obj and getattr(mp, "last_place_position", None) is not None:
+                            positions[f"{place_obj} (place)"] = tuple(
+                                round(v, 3) for v in mp.last_place_position
+                            )
+                    elif mp is not None and task.task_type == "open_drawer":
+                        # Detection key from _build_detection_info is "drawer".
+                        T = getattr(mp, "last_drawer_tag_pose", None)
+                        if T is not None:
+                            positions["drawer"] = tuple(
+                                round(float(v), 3) for v in T[:3, 3]
+                            )
                     if positions:
                         detection_info["__object_positions__"] = positions
                     wb = getattr(getattr(self.env, "config", None), "workspace_bounds", None)
@@ -476,6 +532,17 @@ class CollectionRunner:
                             "x_min": float(wb.x_min), "x_max": float(wb.x_max),
                             "y_min": float(wb.y_min), "y_max": float(wb.y_max),
                         }
+                    # Operator-triggered skip: when the policy is periodic, briefly
+                    # poll stdin so the operator can press the configured skip key
+                    # to fast-forward the rest of the reset period (PeriodicPolicy
+                    # reads __user_skip__).
+                    if self.policy_method == "periodic" and not self.is_dummy:
+                        skip_key = getattr(self.config.policy, "skip_key", "k")
+                        skip_timeout = float(getattr(self.config.policy, "skip_timeout", 3.0))
+                        if self.human_interface.poll_skip_key(
+                            skip_key=skip_key, timeout=skip_timeout
+                        ):
+                            detection_info["__user_skip__"] = True
 
                     # VLMChecklistPolicy: checklist handles both success detection and
                     # reset decision via success_item-flagged questions.
@@ -583,6 +650,7 @@ class CollectionRunner:
                         )
 
                 # Build episode record
+                _last_skip = getattr(self.policy, "last_skip", None) or {}
                 record = EpisodeRecord(
                     episode_idx=ep,
                     episode_id=episode_id,
@@ -603,7 +671,20 @@ class CollectionRunner:
                     dataset_episode_idx=dataset_episode_idx,
                     checklist_eval=checklist_eval,
                     episode_duration=time.time() - episode_start_time,
+                    user_skipped=bool(_last_skip),
+                    skipped_episodes=int(_last_skip.get("skipped_episodes", 0)),
+                    skipped_time_s=float(_last_skip.get("skipped_time_s", 0.0)),
                 )
+                if _last_skip:
+                    self.metrics.log_intervention(InterventionRecord(
+                        timestamp=time.time(),
+                        run_id=self.run_id,
+                        episode_idx=ep,
+                        episode_id=episode_id,
+                        intervention_type="user_skip",
+                        trigger=f"policy={self.policy_method}",
+                        details=_last_skip,
+                    ))
 
                 # Capture terminal flag before advance() mutates scheduler state
                 was_terminal_step = self.task_scheduler.is_terminal_step
@@ -619,7 +700,7 @@ class CollectionRunner:
                     fail_count += 1
                     self.task_scheduler.reset_to_phase_start()
                     log.info(f"[Retry] reset to phase start (step={self.task_scheduler._idx}), fail_count={fail_count}")
-                    if fail_count >= self.max_retries and self.policy_method not in ("periodic", "single_vqa"):
+                    if fail_count >= self.max_retries and self.policy_method not in ("periodic", "single_vqa", "no_reset"):
                         log.warning(f"Max retries ({self.max_retries}) reached, escalating to reset.")
                         decision = "reset"
                         record.policy_decision = "reset"
@@ -771,25 +852,32 @@ class CollectionRunner:
         if decision == "retry":
             self.dataset_recorder.clear_episode_buffer()
 
-    def _make_run_id(self, config) -> str:
+    def _make_run_id(self, config, target_parent: Path = None) -> str:
         """Generate a run ID of the form YYYYMMDD_N (e.g. 20260413_1).
 
-        Scans the dataset root for existing run_YYYYMMDD_* directories and
-        picks the next available counter for today's date.
+        Recursively scans the dataset root for existing run_YYYYMMDD_*
+        directories (they live under <root>/<task>/<policy>/) and picks the
+        next available counter for today's date.
+
+        If ``target_parent`` is supplied, also bumps the counter past any
+        existing ``run_{today}_N`` directly under that parent — defensive
+        guard against accidentally writing into a pre-existing run dir.
         """
         today = datetime.now().strftime("%Y%m%d")
         try:
             root = Path(config.dataset_recorder.root)
-            existing = [
-                d.name for d in root.iterdir()
-                if d.is_dir() and d.name.startswith(f"run_{today}_")
-            ] if root.exists() else []
             counters = []
-            for name in existing:
-                suffix = name[len(f"run_{today}_"):]
-                if suffix.isdigit():
-                    counters.append(int(suffix))
+            if root.exists():
+                for path in root.rglob(f"run_{today}_*"):
+                    if not path.is_dir():
+                        continue
+                    suffix = path.name[len(f"run_{today}_"):]
+                    if suffix.isdigit():
+                        counters.append(int(suffix))
             n = max(counters) + 1 if counters else 0
+            if target_parent is not None:
+                while (target_parent / f"run_{today}_{n}").exists():
+                    n += 1
         except Exception:
             n = 1
         return f"{today}_{n}"
