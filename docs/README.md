@@ -33,10 +33,14 @@ which is not part of this repo:
 | `static/images/ablation.png` | `data_ablation_throughput_taskavg.pdf` | `sips ... -Z 1400` |
 | `static/images/vlm_table.png` | `vlm_table.png` | copied |
 | `static/images/hardware.jpg` | `hardware.pdf` | `sips -s format jpeg -s formatOptions 75 ... -Z 1600` |
-| `static/videos/teaser.mp4` | `abd_demo_v39_compressed.mp4` | `ffmpeg -i <src> -an -vf scale=1280:-2 -c:v libx264 -crf 30 -preset slow -movflags +faststart <dst>` |
+| `static/videos/teaser.mp4` | `abd_demo_v39_compressed.mp4` | `ffmpeg -ss 3 -i <src> -t 173 -an -vf scale=1280:-2 -c:v libx264 -crf 30 -preset slow -movflags +faststart <dst>` |
 | `static/videos/{pp,cup,dr}_{fwd,rev}.mp4` | `demo_videos/*.mp4` | same, `scale=640:-2` |
 | `static/videos/cause_{degrade,infeasible}.mp4` | `cause_*_run0513.mp4` | same, `scale=854:-2` |
-| `static/images/teaser_poster.jpg` | `static/videos/teaser.mp4` | `ffmpeg -ss 2 -i <src> -frames:v 1 -q:v 4 <dst>` |
+| `static/images/teaser_poster.jpg` | `static/videos/teaser.mp4` | `ffmpeg -ss 1 -i <src> -frames:v 1 -q:v 4 <dst>` |
+
+The `-ss 3 -t 173` on the teaser is deliberate: the source video's opening title card and
+closing "thank you" card both print the submission number, so both are cut. Keep them cut
+while the paper is under review, and re-check the first and last frames after any re-export.
 
 Keep assets web-sized; the whole folder is ~14 MB today.
 
