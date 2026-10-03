@@ -23,6 +23,7 @@
       <a href="#abstract">Abstract</a>
       <a href="#method">Method</a>
       <a href="#results">Results</a>
+      <a href="#scaling">Scaling</a>
       <a href="#tasks">Tasks</a>
       <a href="#setup">Setup</a>
     </div>
@@ -169,56 +170,161 @@
 </section>
 
 <!-- ===================== results ===================== -->
-<!-- TODO: numbers and plots below come from the Sep 5 LaTeX snapshot in ../../docs.
-     Re-export them from the current draft before this page goes public. -->
 <section id="results">
   <div class="wrap">
     <h2 class="center">Real-world data collection</h2>
-    <p class="section-sub center">Compared against periodic reset, unstructured VLM judgment, and a no-intervention baseline.</p>
+    <p class="section-sub center">
+      15 real-world manipulation tasks, one hour of autonomous collection per task suite, repeated
+      nine times per strategy. Human interventions happen only when the strategy asks for one.
+    </p>
 
-    <div class="table-scroll">
+    <figure class="chart-figure">
+      <div class="chart" role="img"
+           aria-label="Normalized data throughput: RADAR 0.149, Unstructured VLM 0.619, Oracle-Period 0.696, BEDA 0.843, upper bound 1.0">
+        <div class="chart-head">Normalized data throughput <span>1.0 = task-specific upper bound</span></div>
+        <div class="bars">
+          <div class="bar-row" title="RADAR — 0.149 ± 0.048">
+            <div class="bar-label">RADAR</div>
+            <div class="bar-track"><div class="bar-fill" style="width:14.9%"></div></div>
+            <div class="bar-value">0.149</div>
+          </div>
+          <div class="bar-row" title="Unstructured VLM — 0.619 ± 0.116">
+            <div class="bar-label">Unstructured VLM</div>
+            <div class="bar-track"><div class="bar-fill" style="width:61.9%"></div></div>
+            <div class="bar-value">0.619</div>
+          </div>
+          <div class="bar-row" title="Oracle-Period — 0.696 ± 0.085">
+            <div class="bar-label">Oracle-Period</div>
+            <div class="bar-track"><div class="bar-fill" style="width:69.6%"></div></div>
+            <div class="bar-value">0.696</div>
+          </div>
+          <div class="bar-row is-ours" title="BEDA (ours) — 0.843 ± 0.030">
+            <div class="bar-label">BEDA <span>(ours)</span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:84.3%"></div></div>
+            <div class="bar-value">0.843</div>
+          </div>
+        </div>
+        <div class="bar-axis"><div class="ticks"><span>0</span><span>0.25</span><span>0.5</span><span>0.75</span><span>1.0</span></div></div>
+      </div>
+      <figcaption>
+        <b>Throughput against the upper bound.</b> BEDA reaches 84.3% of the upper bound &mdash; more than
+        5&times; the throughput of RADAR, 36.2% above Unstructured VLM, and 21.1% above Oracle-Period,
+        while requesting no more human interventions than Oracle-Period.
+      </figcaption>
+    </figure>
+
+    <div class="table-scroll" style="margin-top:40px">
       <table>
         <thead>
           <tr>
             <th>Intervention strategy</th>
-            <th>Data throughput &uarr; (/hr)</th>
+            <th>Data throughput &uarr;</th>
             <th>Execution success &uarr; (%)</th>
             <th>Data affordance &uarr;</th>
             <th>Intervention freq. (/hr)</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td>RADAR</td><td>0.194 <span class="pm">±0.05</span></td><td>21.9 <span class="pm">±6.16</span></td><td>0.227 <span class="pm">±0.03</span></td><td>&ndash;</td></tr>
-          <tr><td>Unstructured VLM</td><td>0.544 <span class="pm">±0.14</span></td><td>48.0 <span class="pm">±10.94</span></td><td>0.492 <span class="pm">±0.09</span></td><td>1.23 <span class="pm">±1.12</span></td></tr>
-          <tr><td>Oracle-Period</td><td>0.737 <span class="pm">±0.12</span></td><td>64.2 <span class="pm">±4.82</span></td><td>0.798 <span class="pm">±0.09</span></td><td>10.25 <span class="pm">±1.44</span></td></tr>
-          <tr class="ours"><td>BEDA (ours)</td><td>0.855 <span class="pm">±0.04</span></td><td>79.2 <span class="pm">±5.47</span></td><td>0.843 <span class="pm">±0.06</span></td><td>9.12 <span class="pm">±2.63</span></td></tr>
+          <tr><td>RADAR</td><td>0.149 <span class="pm">±0.048</span></td><td>16.8 <span class="pm">±5.6</span></td><td>0.178 <span class="pm">±0.038</span></td><td>&ndash;</td></tr>
+          <tr><td>Unstructured VLM</td><td>0.619 <span class="pm">±0.116</span></td><td>60.4 <span class="pm">±11.4</span></td><td>0.615 <span class="pm">±0.106</span></td><td>11.56 <span class="pm">±7.53</span></td></tr>
+          <tr><td>Oracle-Period</td><td>0.696 <span class="pm">±0.085</span></td><td>63.9 <span class="pm">±4.4</span></td><td>0.772 <span class="pm">±0.070</span></td><td>8.80 <span class="pm">±1.44</span></td></tr>
+          <tr class="ours"><td>BEDA (ours)</td><td>0.843 <span class="pm">±0.030</span></td><td>82.8 <span class="pm">±4.7</span></td><td>0.874 <span class="pm">±0.051</span></td><td>7.87 <span class="pm">±2.09</span></td></tr>
         </tbody>
       </table>
     </div>
     <figcaption style="text-align:center;margin-top:12px">
       <b>Data collection comparison.</b> Averaged across all task suites; mean ± standard error.
+      Data throughput is normalized by the task-specific upper bound, so 0.843 is 84.3% of it.
     </figcaption>
 
-    <div class="grid-2" style="margin-top:40px">
-      <figure class="plot-wrap">
-        <span class="plot"><img src="static/images/throughput.png" alt="Normalized data throughput over collection time" loading="lazy"></span>
-        <figcaption><b>Normalized data throughput.</b> BEDA accumulates valid episodes fastest among baselines and stays closest to the ideal upper bound. Shaded regions denote standard errors.</figcaption>
-      </figure>
-      <figure class="plot-wrap">
-        <span class="plot"><img src="static/images/affordance.png" alt="Averaged data affordance score over collection time" loading="lazy"></span>
-        <figcaption><b>Averaged data affordance score.</b> BEDA sustains higher data affordance than the baselines throughout long-horizon collection.</figcaption>
-      </figure>
+    <div class="grid-2" style="margin-top:44px">
+      <div>
+        <h2 style="font-size:20px">Downstream utility</h2>
+        <p style="color:var(--fg-muted);font-size:16px">
+          A behavior cloning policy trained on the collected demonstrations improves from
+          <b>38.3%</b> held-out success at N&nbsp;=&nbsp;50 to <b>67.5%</b> at N&nbsp;=&nbsp;300. Under a matched
+          collection-time budget, the policy trained on BEDA data reaches <b>3.1&times; lower</b> normalized
+          k-step action prediction error than the reverse transfer.
+        </p>
+      </div>
+      <div>
+        <h2 style="font-size:20px">Evaluation cost</h2>
+        <p style="color:var(--fg-muted);font-size:16px">
+          Each bidirectional evaluation takes <b>3.75&nbsp;s</b> and about <b>2,100 tokens</b> per episode.
+          The reported throughput already includes this latency, the reset decision, and manual reset
+          time &mdash; so the VLM evaluation is not an added bottleneck in practice.
+        </p>
+      </div>
     </div>
+  </div>
+</section>
 
-    <div class="grid-2" style="margin-top:40px">
-      <figure class="plot-wrap">
-        <span class="plot"><img src="static/images/ablation.png" alt="Ablation on bidirectional evaluation" loading="lazy"></span>
-        <figcaption><b>Ablation on bidirectional evaluation.</b> BEDA beats retrospective-only and prospective-only variants, showing that validity and feasibility provide complementary intervention signals.</figcaption>
-      </figure>
-      <figure class="plot-wrap">
-        <span class="plot"><img src="static/images/vlm_table.png" alt="VLM evaluation agreement with human oracle labels" loading="lazy"></span>
-        <figcaption><b>Agreement with human oracle.</b> Structured checklist evaluation aligns intervention decisions with human judgments more closely than open-ended VLM prompting.</figcaption>
-      </figure>
+<!-- ===================== ablation ===================== -->
+<section id="ablation">
+  <div class="wrap">
+    <h2 class="center">Both directions are necessary</h2>
+    <p class="section-sub center">Removing either half of the bidirectional evaluation costs throughput.</p>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Variant</th>
+            <th>Throughput &uarr;</th>
+            <th>Exec. success &uarr; (%)</th>
+            <th>Affordance &uarr;</th>
+            <th>Interv. freq. (/hr)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Prospective-only</td><td>0.387</td><td>23.7</td><td>0.233</td><td>3.04</td></tr>
+          <tr><td>Retrospective-only</td><td>0.656</td><td>58.3</td><td>0.621</td><td>26.20</td></tr>
+          <tr class="ours"><td>BEDA (both)</td><td>0.843</td><td>82.8</td><td>0.874</td><td>7.87</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figcaption style="text-align:center;margin-top:12px">
+      <b>Ablation on bidirectional evaluation.</b> The prospective-only variant drops validity from the
+      decision, so it continues from feasible scenes without accumulating successful demonstrations.
+      The retrospective-only variant lacks foresight about recoverability and resets even when
+      collection could have continued &mdash; it intervenes more than three times as often as BEDA.
+    </figcaption>
+  </div>
+</section>
+
+<!-- ===================== evaluator ===================== -->
+<section id="evaluator">
+  <div class="wrap">
+    <h2 class="center">Do the decisions match a human?</h2>
+    <p class="section-sub center">Intervention decisions compared against human data affordance labels.</p>
+
+    <figure class="plot-wrap" style="max-width:860px;margin:0 auto">
+      <span class="plot"><img src="static/images/vlm_table.png" alt="Intervention decision accuracy against human labels for each evaluator" loading="lazy"></span>
+      <figcaption>
+        <b>Intervention decision accuracy.</b> BEDA reaches 0.903 accuracy &mdash; close to AHA-FT (0.937),
+        a failure detector fine-tuned on in-domain data &mdash; without any task-specific supervision, and
+        leads every baseline on precision, meaning fewer unnecessary resets. The gains hold across
+        three VLM backbones (GPT-5.4, Claude Sonnet 5, Qwen3-VL).
+      </figcaption>
+    </figure>
+
+    <div class="grid-2" style="margin-top:36px">
+      <div>
+        <h2 style="font-size:20px">Where the errors are</h2>
+        <p style="color:var(--fg-muted);font-size:16px">
+          Errors concentrate in fine-grained scene assessment &mdash; object&ndash;object spatial relations
+          judged from correct detections &mdash; and in omitted functional state, such as whether a drawer
+          is jammed.
+        </p>
+      </div>
+      <div>
+        <h2 style="font-size:20px">Why they do not compound</h2>
+        <p style="color:var(--fg-muted);font-size:16px">
+          Reset-needed states are re-evaluated after every episode, so <b>92.4%</b> of missed-detection
+          streaks resolve within two evaluations, and invalid demonstrations make up only <b>2.0%</b> of
+          the accepted data.
+        </p>
+      </div>
     </div>
   </div>
 </section>
@@ -226,10 +332,30 @@
 <!-- ===================== scaling ===================== -->
 <section id="scaling">
   <div class="wrap">
-    <h2 class="center">Scaled multi-robot simulation</h2>
-    <p class="section-sub center">One operator, fleets of up to 128 robots.</p>
-    <!-- TODO: add the operator-capacity / fleet-scaling figure from the current draft. -->
-    <div class="placeholder">Fleet-scaling figure coming soon</div>
+    <h2 class="center">One operator, many robots</h2>
+    <p class="section-sub center">
+      A human-in-the-loop simulation where a single operator oversees parallel robot streams, each
+      becoming reset-needed with probability 0.1 after an episode.
+    </p>
+
+    <div class="prose center" style="max-width:40em">
+      <p style="color:var(--fg-muted)">
+        BEDA's decision outcomes are replayed from its measured real-robot decision profile, while
+        evaluator and operator confirmation latencies are measured online.
+      </p>
+    </div>
+
+    <div class="stats" style="margin-top:26px">
+      <div class="stat"><div class="v">91%</div><div class="k">of ideal throughput across 1&ndash;128 robots</div></div>
+      <div class="stat"><div class="v">0.1</div><div class="k">per-episode probability a stream needs a reset</div></div>
+      <div class="stat"><div class="v">256</div><div class="k">robots: even the ideal strategy saturates</div></div>
+    </div>
+
+    <p class="section-sub center" style="margin:26px auto 0;max-width:46em">
+      As the fleet grows, continuous supervision becomes bottlenecked by episode-wise checks, and
+      periodic intervention stays limited by delayed detection. Allocating operator attention by
+      affordance keeps throughput near ideal with low robot waiting.
+    </p>
   </div>
 </section>
 
@@ -237,7 +363,11 @@
 <section id="tasks">
   <div class="wrap">
     <h2 class="center">Task suites</h2>
-    <p class="section-sub center">Reversible task pairs let collection continue without a human in the loop.</p>
+    <p class="section-sub center">
+      15 real-world manipulation tasks grouped into four transitionable task pools. Each pool pairs a
+      forward task with the task that returns the scene, so collection can continue without a human.
+      Three pools are shown below.
+    </p>
 
     <div class="grid-3">
       <div class="vcard">
@@ -265,7 +395,6 @@
         <div class="meta"><div class="t">Close drawer</div><div class="d">reverse</div></div>
       </div>
     </div>
-    <!-- TODO: extend to the full 15-task suite reported in the current draft. -->
   </div>
 </section>
 
@@ -273,9 +402,13 @@
 <section id="setup">
   <div class="wrap">
     <h2 class="center">Hardware setup</h2>
+    <p class="section-sub center">
+      A tabletop workspace with an AgileX PiPER arm and three RGB cameras. BEDA is instantiated with
+      GPT-5.4 as the VLM backbone and a fixed intervention threshold of 0.9 across every task.
+    </p>
     <figure>
       <img src="static/images/hardware.jpg" alt="Robot hardware and tabletop workspace setup" loading="lazy">
-      <figcaption><b>Real-world tabletop workspace.</b> A single manipulator with fixed and wrist-mounted cameras collects data autonomously between human resets.</figcaption>
+      <figcaption><b>Real-world tabletop workspace.</b> One manipulator with wrist-mounted and fixed cameras collects data autonomously between human resets.</figcaption>
     </figure>
   </div>
 </section>
