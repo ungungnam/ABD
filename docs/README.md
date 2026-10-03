@@ -12,12 +12,13 @@ python3 -m http.server 8000 --directory docs
 ## Deploy (GitHub Pages)
 
 The repo is public and Pages is enabled on `main` + `/docs`, so this folder *is*
-the site: <https://ungungnam.github.io/ABD/>. A push to `main` rebuilds it;
-`gh api repos/ungungnam/ABD/pages/builds/latest --jq .status` reports the build.
+the site: <https://ungungnam.github.io/BEDA/>. A push to `main` rebuilds it;
+`gh api repos/ungungnam/BEDA/pages/builds/latest --jq .status` reports the build.
 
 It is linked as "project" from the BEDA card on <https://ungungnam.github.io/>,
-which follows the same one-repo-per-project pattern as `/PaPA/`. To get the
-prettier `/beda/` URL, rename the repo — GitHub redirects the old paths.
+which follows the same one-repo-per-project pattern as `/PaPA/`. The repo was
+renamed `ABD` → `BEDA` to get this URL; note that Pages paths are not
+redirected, so the old `/ABD/` path is gone (github.com repo URLs do redirect).
 
 Everything in a Pages repo is publicly fetchable, this README included.
 `index.html` sets `<meta name="robots" content="noindex">`, which discourages
