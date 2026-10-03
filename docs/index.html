@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scalable Autonomous Robotic Data Collection via Data Affordance-Guided Intervention</title>
+<meta name="description" content="BEDA: Bidirectional Evaluation of Data Affordance — an affordance-guided robotic data collection system that decides when human intervention is needed.">
+<meta name="robots" content="noindex">
+<meta property="og:title" content="Data Affordance-Guided Robotic Data Collection">
+<meta property="og:description" content="BEDA decomposes scene diagnosis into retrospective trajectory validity and prospective task feasibility to decide intervention timing.">
+<meta property="og:image" content="static/images/concept.png">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='48' font-size='48'>🤖</text></svg>">
+<link rel="stylesheet" href="static/css/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <span class="nav-brand">BEDA</span>
+    <div class="nav-links">
+      <a href="#video">Video</a>
+      <a href="#abstract">Abstract</a>
+      <a href="#method">Method</a>
+      <a href="#results">Results</a>
+      <a href="#tasks">Tasks</a>
+      <a href="#setup">Setup</a>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>
+  </div>
+</nav>
+
+<header class="hero wrap">
+  <span class="badge">Under review</span>
+  <h1>Scalable Autonomous Robotic Data Collection via Data Affordance-Guided Intervention</h1>
+  <p class="subtitle"><b>BEDA</b> — <b>B</b>idirectional <b>E</b>valuation of <b>D</b>ata <b>A</b>ffordance</p>
+
+  <div class="authors">
+    <div class="anon">Anonymous Submission</div>
+    <div class="note">Author information is withheld during the review period.</div>
+  </div>
+
+  <div class="links">
+    <a class="btn" aria-disabled="true" href="#">Paper &middot; coming soon</a>
+    <a class="btn btn-primary" href="#video">Watch video</a>
+    <a class="btn" aria-disabled="true" href="#">Code &middot; coming soon</a>
+  </div>
+</header>
+
+<!-- ===================== teaser video ===================== -->
+<section id="video">
+  <div class="wrap">
+    <figure class="teaser">
+      <video src="static/videos/teaser.mp4" poster="static/images/teaser_poster.jpg"
+             controls playsinline preload="metadata"></video>
+    </figure>
+    <figcaption style="margin-top:14px">
+      <b>System overview video.</b> Episode-wise autonomous execution, bidirectional data affordance
+      evaluation after each rollout, and affordance-guided decisions on when a human reset is requested.
+    </figcaption>
+  </div>
+</section>
+
+<!-- ===================== abstract ===================== -->
+<section id="abstract">
+  <div class="wrap">
+    <div class="prose">
+      <h2>Abstract</h2>
+      <p class="abstract">
+        Large-scale robotic learning increasingly relies on diverse real-world interaction data, yet
+        collecting such data remains difficult to scale. Although autonomous collection systems reduce
+        the need for continuous low-level teleoperation, inherent failures and environment degradation
+        still require human intervention when continued execution becomes infeasible. This shifts the
+        bottleneck from controlling the robot to deciding when the environment requires a manual reset.
+        We propose an affordance-guided robotic data collection system that maintains productive scene
+        states by using <i>data affordance</i>: whether the current scene can support the continued
+        collection of a valid interaction dataset. At its core, <b>BEDA</b> (Bidirectional Evaluation of
+        Data Affordance) decomposes scene diagnosis into retrospective evaluation of trajectory validity
+        and prospective evaluation of next-task feasibility. A task-agnostic diagnosis protocol is
+        instantiated with task descriptions to generate task-specific checklists, enabling structured
+        VLM-based evaluation of whether collection should continue or request intervention. Across 15
+        real-world tabletop tasks, our affordance-guided collection system reaches 84.3% of the
+        throughput upper bound. Scaled multi-robot simulations further show increased operator capacity,
+        with a single operator maintaining 91% of ideal throughput across fleets of up to 128 robots.
+        BEDA's intervention decisions closely align with human oracle labels, and ablations confirm that
+        both retrospective and prospective evaluations are necessary. These results establish
+        affordance-guided intervention as a practical mechanism for scalable long-horizon robotic data
+        collection.
+      </p>
+    </div>
+
+    <div class="stats" style="margin-top:34px">
+      <div class="stat"><div class="v">15</div><div class="k">real-world tabletop tasks</div></div>
+      <div class="stat"><div class="v">84.3%</div><div class="k">of throughput upper bound</div></div>
+      <div class="stat"><div class="v">128</div><div class="k">robots per operator (sim)</div></div>
+      <div class="stat"><div class="v">91%</div><div class="k">of ideal throughput at scale</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== concept ===================== -->
+<section id="concept">
+  <div class="wrap">
+    <h2 class="center">Affordance-guided data collection</h2>
+    <p class="section-sub center">Intervene when the scene can no longer support valid interaction — not merely when a task fails.</p>
+    <figure>
+      <img src="static/images/concept.png" alt="Concept figure: affordance-guided robotic data collection system" loading="lazy">
+      <figcaption>
+        <b>Affordance-guided robotic data collection system.</b> The system performs episode-wise
+        autonomous task execution, evaluates the resulting environment state using bidirectional data
+        affordance evaluation, and uses the estimated affordance to decide when intervention is needed.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ===================== method ===================== -->
+<section id="method">
+  <div class="wrap">
+    <h2 class="center">Method</h2>
+    <p class="section-sub center">Bidirectional evaluation turns open-ended failure judgment into two structured checks.</p>
+
+    <figure class="framed">
+      <img src="static/images/overview.png" alt="Pipeline overview: execution, bidirectional evaluation, intervention decision" loading="lazy">
+      <figcaption>
+        <b>Affordance-guided robotic data collection pipeline.</b> At each episode the robot executes the
+        current task, collects a trajectory, and reaches a post-execution state. BEDA evaluates this
+        candidate state by combining <i>retrospective</i> and <i>prospective</i> evaluation, producing a
+        data affordance score that decides whether to continue autonomous collection or request a reset.
+      </figcaption>
+    </figure>
+
+    <div class="grid-2" style="margin-top:36px">
+      <div>
+        <h2 style="font-size:20px">Retrospective evaluation</h2>
+        <p style="color:var(--fg-muted);font-size:16px">
+          Looks backward at the episode that just finished: was the collected trajectory a valid piece of
+          interaction data? A nominally successful rollout can still be invalid, and a failed grasp can
+          still leave usable data behind.
+        </p>
+      </div>
+      <div>
+        <h2 style="font-size:20px">Prospective evaluation</h2>
+        <p style="color:var(--fg-muted);font-size:16px">
+          Looks forward at the resulting scene: can the next task still be executed from here? Displaced
+          objects, fallen items, or a jammed drawer make continued collection infeasible even after a
+          success.
+        </p>
+      </div>
+    </div>
+
+    <div style="margin-top:36px" class="grid-2">
+      <div class="vcard">
+        <video src="static/videos/cause_infeasible.mp4" muted loop playsinline preload="metadata" controls></video>
+        <div class="meta">
+          <div class="t">Infeasible next task</div>
+          <div class="d">Prospective evaluation flags the scene before the next episode starts.</div>
+        </div>
+      </div>
+      <div class="vcard">
+        <video src="static/videos/cause_degrade.mp4" muted loop playsinline preload="metadata" controls></video>
+        <div class="meta">
+          <div class="t">Degraded environment</div>
+          <div class="d">Retrospective evaluation rejects the trajectory and triggers intervention.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== results ===================== -->
+<!-- TODO: numbers and plots below come from the Sep 5 LaTeX snapshot in ../../docs.
+     Re-export them from the current draft before this page goes public. -->
+<section id="results">
+  <div class="wrap">
+    <h2 class="center">Real-world data collection</h2>
+    <p class="section-sub center">Compared against periodic reset, unstructured VLM judgment, and a no-intervention baseline.</p>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Intervention strategy</th>
+            <th>Data throughput &uarr; (/hr)</th>
+            <th>Execution success &uarr; (%)</th>
+            <th>Data affordance &uarr;</th>
+            <th>Intervention freq. (/hr)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>RADAR</td><td>0.194 <span class="pm">±0.05</span></td><td>21.9 <span class="pm">±6.16</span></td><td>0.227 <span class="pm">±0.03</span></td><td>&ndash;</td></tr>
+          <tr><td>Unstructured VLM</td><td>0.544 <span class="pm">±0.14</span></td><td>48.0 <span class="pm">±10.94</span></td><td>0.492 <span class="pm">±0.09</span></td><td>1.23 <span class="pm">±1.12</span></td></tr>
+          <tr><td>Oracle-Period</td><td>0.737 <span class="pm">±0.12</span></td><td>64.2 <span class="pm">±4.82</span></td><td>0.798 <span class="pm">±0.09</span></td><td>10.25 <span class="pm">±1.44</span></td></tr>
+          <tr class="ours"><td>BEDA (ours)</td><td>0.855 <span class="pm">±0.04</span></td><td>79.2 <span class="pm">±5.47</span></td><td>0.843 <span class="pm">±0.06</span></td><td>9.12 <span class="pm">±2.63</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figcaption style="text-align:center;margin-top:12px">
+      <b>Data collection comparison.</b> Averaged across all task suites; mean ± standard error.
+    </figcaption>
+
+    <div class="grid-2" style="margin-top:40px">
+      <figure class="plot-wrap">
+        <span class="plot"><img src="static/images/throughput.png" alt="Normalized data throughput over collection time" loading="lazy"></span>
+        <figcaption><b>Normalized data throughput.</b> BEDA accumulates valid episodes fastest among baselines and stays closest to the ideal upper bound. Shaded regions denote standard errors.</figcaption>
+      </figure>
+      <figure class="plot-wrap">
+        <span class="plot"><img src="static/images/affordance.png" alt="Averaged data affordance score over collection time" loading="lazy"></span>
+        <figcaption><b>Averaged data affordance score.</b> BEDA sustains higher data affordance than the baselines throughout long-horizon collection.</figcaption>
+      </figure>
+    </div>
+
+    <div class="grid-2" style="margin-top:40px">
+      <figure class="plot-wrap">
+        <span class="plot"><img src="static/images/ablation.png" alt="Ablation on bidirectional evaluation" loading="lazy"></span>
+        <figcaption><b>Ablation on bidirectional evaluation.</b> BEDA beats retrospective-only and prospective-only variants, showing that validity and feasibility provide complementary intervention signals.</figcaption>
+      </figure>
+      <figure class="plot-wrap">
+        <span class="plot"><img src="static/images/vlm_table.png" alt="VLM evaluation agreement with human oracle labels" loading="lazy"></span>
+        <figcaption><b>Agreement with human oracle.</b> Structured checklist evaluation aligns intervention decisions with human judgments more closely than open-ended VLM prompting.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== scaling ===================== -->
+<section id="scaling">
+  <div class="wrap">
+    <h2 class="center">Scaled multi-robot simulation</h2>
+    <p class="section-sub center">One operator, fleets of up to 128 robots.</p>
+    <!-- TODO: add the operator-capacity / fleet-scaling figure from the current draft. -->
+    <div class="placeholder">Fleet-scaling figure coming soon</div>
+  </div>
+</section>
+
+<!-- ===================== tasks ===================== -->
+<section id="tasks">
+  <div class="wrap">
+    <h2 class="center">Task suites</h2>
+    <p class="section-sub center">Reversible task pairs let collection continue without a human in the loop.</p>
+
+    <div class="grid-3">
+      <div class="vcard">
+        <video src="static/videos/pp_fwd.mp4" muted loop playsinline preload="metadata" controls></video>
+        <div class="meta"><div class="t">Pick &amp; place</div><div class="d">forward</div></div>
+      </div>
+      <div class="vcard">
+        <video src="static/videos/cup_fwd.mp4" muted loop playsinline preload="metadata" controls></video>
+        <div class="meta"><div class="t">Stack cups</div><div class="d">forward</div></div>
+      </div>
+      <div class="vcard">
+        <video src="static/videos/dr_fwd.mp4" muted loop playsinline preload="metadata" controls></video>
+        <div class="meta"><div class="t">Open drawer</div><div class="d">forward</div></div>
+      </div>
+      <div class="vcard">
+        <video src="static/videos/pp_rev.mp4" muted loop playsinline preload="metadata" controls></video>
+        <div class="meta"><div class="t">Pick &amp; place</div><div class="d">reverse</div></div>
+      </div>
+      <div class="vcard">
+        <video src="static/videos/cup_rev.mp4" muted loop playsinline preload="metadata" controls></video>
+        <div class="meta"><div class="t">Unstack cups</div><div class="d">reverse</div></div>
+      </div>
+      <div class="vcard">
+        <video src="static/videos/dr_rev.mp4" muted loop playsinline preload="metadata" controls></video>
+        <div class="meta"><div class="t">Close drawer</div><div class="d">reverse</div></div>
+      </div>
+    </div>
+    <!-- TODO: extend to the full 15-task suite reported in the current draft. -->
+  </div>
+</section>
+
+<!-- ===================== setup ===================== -->
+<section id="setup">
+  <div class="wrap">
+    <h2 class="center">Hardware setup</h2>
+    <figure>
+      <img src="static/images/hardware.jpg" alt="Robot hardware and tabletop workspace setup" loading="lazy">
+      <figcaption><b>Real-world tabletop workspace.</b> A single manipulator with fixed and wrist-mounted cameras collects data autonomously between human resets.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Anonymous submission &middot; under review. Paper and code will be released after the review period.
+  </div>
+</footer>
+
+<script src="static/js/main.js"></script>
+</body>
+</html>
