@@ -45,6 +45,12 @@ folder), which is not part of this repo:
 | `static/images/concept.png` | `concept_v9.pdf` (= Fig. 1) | `sips -s format png <src> --out <dst> -Z 2000` |
 | `static/images/overview.png` | `overview_v2.pdf` (= Fig. 2) | `sips ... -Z 2400` |
 | `static/images/vlm_table.png` | `vlm_table.png` (= Table II) | copied |
+| `static/images/throughput_time.png` | draft p5, Fig. 3(a) | PyMuPDF clip render, see below |
+| `static/images/affordance_time.png` | draft p5, Fig. 3(b) | PyMuPDF clip render |
+| `static/images/ablation_throughput.png` | draft p7, Fig. 6(a) | PyMuPDF clip render |
+| `static/images/scaling_throughput.png` | draft p6, Fig. 4(a) | embedded image, extracted natively |
+| `static/images/scaling_waiting.png` | draft p6, Fig. 4(b) | embedded image, extracted natively |
+| `static/images/fn_streaks.png` | draft p6, Fig. 5 | embedded image, extracted natively |
 | `static/images/hardware.jpg` | `hardware.pdf` | `sips -s format jpeg -s formatOptions 75 ... -Z 1600` |
 | `static/videos/teaser.mp4` | `abd_demo_v39_compressed.mp4` | `ffmpeg -ss 3 -i <src> -t 173 -an -vf scale=1280:-2 -c:v libx264 -crf 30 -preset slow -movflags +faststart <dst>` |
 | `static/videos/{pp,cup,dr}_{fwd,rev}.mp4` | `demo_videos/*.mp4` | same, `scale=640:-2` |
@@ -59,27 +65,47 @@ last frames after any re-export.
 
 Keep assets web-sized; the whole folder is ~13 MB today.
 
-## Missing: the plots
+## Pulling figures out of the draft
 
-The draft's line plots have no current export in `../../docs` (the plot PDFs there
-are the Sep 5 run, whose baseline numbers no longer match Table I), so the page
-currently carries no curves. Export these from the draft and they can be wired in:
+The plots have no standalone export in `../../docs`, so they come straight out of
+the draft PDF. There is no `pdftoppm`/`pdftotext` on this machine and `sips` only
+converts page 1, so use PyMuPDF in a throwaway venv:
 
-- [ ] **Fig. 3** (a) normalized throughput over elapsed time, (b) data affordance over
-      elapsed time → goes in `#results`, replacing nothing (it is additive).
-- [ ] **Fig. 4** (a) normalized throughput over deployed robot number, (b) robot waiting
-      time over deployed robot number → goes in `#scaling`, which is currently text + stats.
-- [ ] **Fig. 6a** data throughput over elapsed time for the ablation variants → goes in
-      `#ablation`, next to the table.
+```bash
+python3 -m venv /tmp/pdfvenv && /tmp/pdfvenv/bin/pip install pymupdf
+```
 
-Drop each as a single-page PDF in `../../docs`, then convert with
-`sips -s format png <src> --out static/images/<name>.png -Z 1600` and add a
-`<figure class="plot-wrap"><span class="plot"><img ...></span><figcaption>…</figcaption></figure>`
-block — same pattern as the Table II figure in `#evaluator`.
+Vector figures are rendered from a clip rectangle at zoom 6 (~432 dpi); the two
+Fig. 4 panels and Fig. 5 are embedded rasters and come out at native resolution
+(~6000 px wide, downscale with `sips -Z 1800`):
+
+```python
+import pymupdf
+d = pymupdf.open('paper.pdf')
+# page index, clip rect in PDF points — page.get_text('blocks') gives the
+# caption/axis-label boxes these were read off, so re-derive them if the
+# layout moves
+vec = {'throughput_time':     (4, (82, 52, 240, 181)),   # Fig. 3(a)
+       'affordance_time':     (4, (248, 52, 532, 181)),  # Fig. 3(b)
+       'ablation_throughput': (6, (86, 54, 266, 202))}   # Fig. 6(a)
+for name, (pno, clip) in vec.items():
+    d[pno].get_pixmap(matrix=pymupdf.Matrix(6, 6),
+                      clip=pymupdf.Rect(*clip), alpha=False).save(f'{name}.png')
+
+for info in d[5].get_image_info(xrefs=True):   # Fig. 4(a), 4(b), Fig. 5
+    img = d.extract_image(info['xref'])
+    print(info['bbox'], img['width'], img['height'])
+```
+
+Re-run this after any draft revision; the clip rects are tied to the current
+layout, so check each output before publishing.
 
 ## TODO before/after review
 
-- [ ] Add the three figure groups above.
+- [ ] Fig. 3(a) ends at ~0.52 for Unstructured VLM and ~0.11 for RADAR, while
+      Table I reports 0.619 and 0.149 for the same two baselines. Both are on the
+      page as the draft has them — worth checking which aggregation is intended.
+
 - [ ] Decide on the baseline-comparison videos (`beda/oracle/periodic/continuous.mp4`,
       ~70 MB each in the source folder — compress before adding).
 - [ ] Extend the task-suite grid beyond the three pools now shown.

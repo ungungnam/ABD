@@ -178,40 +178,22 @@
       nine times per strategy. Human interventions happen only when the strategy asks for one.
     </p>
 
-    <figure class="chart-figure">
-      <div class="chart" role="img"
-           aria-label="Normalized data throughput: RADAR 0.149, Unstructured VLM 0.619, Oracle-Period 0.696, BEDA 0.843, upper bound 1.0">
-        <div class="chart-head">Normalized data throughput <span>1.0 = task-specific upper bound</span></div>
-        <div class="bars">
-          <div class="bar-row" title="RADAR — 0.149 ± 0.048">
-            <div class="bar-label">RADAR</div>
-            <div class="bar-track"><div class="bar-fill" style="width:14.9%"></div></div>
-            <div class="bar-value">0.149</div>
-          </div>
-          <div class="bar-row" title="Unstructured VLM — 0.619 ± 0.116">
-            <div class="bar-label">Unstructured VLM</div>
-            <div class="bar-track"><div class="bar-fill" style="width:61.9%"></div></div>
-            <div class="bar-value">0.619</div>
-          </div>
-          <div class="bar-row" title="Oracle-Period — 0.696 ± 0.085">
-            <div class="bar-label">Oracle-Period</div>
-            <div class="bar-track"><div class="bar-fill" style="width:69.6%"></div></div>
-            <div class="bar-value">0.696</div>
-          </div>
-          <div class="bar-row is-ours" title="BEDA (ours) — 0.843 ± 0.030">
-            <div class="bar-label">BEDA <span>(ours)</span></div>
-            <div class="bar-track"><div class="bar-fill" style="width:84.3%"></div></div>
-            <div class="bar-value">0.843</div>
-          </div>
-        </div>
-        <div class="bar-axis"><div class="ticks"><span>0</span><span>0.25</span><span>0.5</span><span>0.75</span><span>1.0</span></div></div>
-      </div>
-      <figcaption>
-        <b>Throughput against the upper bound.</b> BEDA reaches 84.3% of the upper bound &mdash; more than
-        5&times; the throughput of RADAR, 36.2% above Unstructured VLM, and 21.1% above Oracle-Period,
-        while requesting no more human interventions than Oracle-Period.
-      </figcaption>
-    </figure>
+    <div class="grid-ab">
+      <figure class="plot-wrap">
+        <span class="plot"><img src="static/images/throughput_time.png" alt="Normalized data throughput over elapsed collection time for each strategy" loading="lazy"></span>
+        <figcaption><b>(a) Normalized data throughput.</b> BEDA accumulates valid episodes fastest and stays closest to the ideal upper bound.</figcaption>
+      </figure>
+      <figure class="plot-wrap">
+        <span class="plot"><img src="static/images/affordance_time.png" alt="Average data affordance score over elapsed collection time for each strategy" loading="lazy"></span>
+        <figcaption><b>(b) Average data affordance score.</b> BEDA sustains higher affordance throughout collection, while RADAR degrades to zero once its autonomous reset cannot recover the scene.</figcaption>
+      </figure>
+    </div>
+    <figcaption style="text-align:center;margin-top:14px">
+      <b>Long-horizon data collection performance.</b> Shaded regions denote standard errors.
+      BEDA reaches 84.3% of the upper bound &mdash; more than 5&times; the throughput of RADAR,
+      36.2% above Unstructured VLM, and 21.1% above Oracle-Period, while requesting no more human
+      interventions than Oracle-Period.
+    </figcaption>
 
     <div class="table-scroll" style="margin-top:40px">
       <table>
@@ -264,6 +246,11 @@
   <div class="wrap">
     <h2 class="center">Both directions are necessary</h2>
     <p class="section-sub center">Removing either half of the bidirectional evaluation costs throughput.</p>
+
+    <figure class="plot-wrap" style="max-width:520px;margin:0 auto 32px">
+      <span class="plot"><img src="static/images/ablation_throughput.png" alt="Data throughput over elapsed time for BEDA and the two single-direction variants" loading="lazy"></span>
+      <figcaption><b>(a) Data throughput over elapsed time.</b> Removing either evaluation reduces throughput.</figcaption>
+    </figure>
 
     <div class="table-scroll">
       <table>
@@ -324,6 +311,10 @@
           streaks resolve within two evaluations, and invalid demonstrations make up only <b>2.0%</b> of
           the accepted data.
         </p>
+        <figure class="plot-wrap" style="margin-top:16px">
+          <span class="plot" style="min-height:0"><img src="static/images/fn_streaks.png" alt="Distribution of false-negative streak lengths" loading="lazy"></span>
+          <figcaption><b>False-negative streak lengths.</b> Most missed reset decisions occur as isolated or short streaks.</figcaption>
+        </figure>
       </div>
     </div>
   </div>
@@ -345,10 +336,15 @@
       </p>
     </div>
 
-    <div class="stats" style="margin-top:26px">
-      <div class="stat"><div class="v">91%</div><div class="k">of ideal throughput across 1&ndash;128 robots</div></div>
-      <div class="stat"><div class="v">0.1</div><div class="k">per-episode probability a stream needs a reset</div></div>
-      <div class="stat"><div class="v">256</div><div class="k">robots: even the ideal strategy saturates</div></div>
+    <div class="grid-2" style="margin-top:26px">
+      <figure class="plot-wrap">
+        <span class="plot" style="min-height:0"><img src="static/images/scaling_throughput.png" alt="Normalized throughput against the number of deployed robots" loading="lazy"></span>
+        <figcaption><b>(a) Normalized throughput over deployed robots.</b> BEDA holds 91% of ideal throughput across 1&ndash;128 robots; at 256 robots even the ideal strategy approaches operator saturation.</figcaption>
+      </figure>
+      <figure class="plot-wrap">
+        <span class="plot" style="min-height:0"><img src="static/images/scaling_waiting.png" alt="Robot waiting time against the number of deployed robots" loading="lazy"></span>
+        <figcaption><b>(b) Robot waiting time over deployed robots.</b> Affordance-guided intervention keeps robots waiting far less than continuous supervision.</figcaption>
+      </figure>
     </div>
 
     <p class="section-sub center" style="margin:26px auto 0;max-width:46em">
