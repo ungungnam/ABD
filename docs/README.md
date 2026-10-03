@@ -9,25 +9,19 @@ python3 -m http.server 8000 --directory docs
 # http://localhost:8000
 ```
 
-## Deploy
+## Deploy (GitHub Pages)
 
-This folder is the source of record. It is **not** served from this repo: GitHub
-Pages is a paid feature for private repositories, and the API refuses it here
-("Your current plan does not support GitHub Pages for this repository").
+The repo is public and Pages is enabled on `main` + `/docs`, so this folder *is*
+the site: <https://ungungnam.github.io/ABD/>. A push to `main` rebuilds it;
+`gh api repos/ungungnam/ABD/pages/builds/latest --jq .status` reports the build.
 
-The published copy lives in the personal Pages repo and is live at
-<https://ungungnam.github.io/beda/>, linked from the BEDA entry on
-<https://ungungnam.github.io/>. Mirror this folder there after any edit:
+It is linked as "project" from the BEDA card on <https://ungungnam.github.io/>,
+which follows the same one-repo-per-project pattern as `/PaPA/`. To get the
+prettier `/beda/` URL, rename the repo — GitHub redirects the old paths.
 
-```bash
-rsync -a --delete --exclude '.omc' --exclude '.DS_Store' --exclude 'README.md' \
-  ~/Desktop/research/BEDA/ABD/docs/ ~/Desktop/research/ungungnam.github.io/beda/
-```
-
-`README.md` is excluded on purpose — every file in a Pages repo is publicly
-fetchable, and these notes are not meant to be. `index.html` sets
-`<meta name="robots" content="noindex">`, which discourages search indexing but
-does not make the page private.
+Everything in a Pages repo is publicly fetchable, this README included.
+`index.html` sets `<meta name="robots" content="noindex">`, which discourages
+search indexing but does not make the page private.
 
 ## Where the content comes from
 
